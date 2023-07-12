@@ -29,5 +29,5 @@ for values in time:
 plt.plot(range(len(time)), time)
 grand_list = pd.DataFrame({'time': time, 'phase': phase, 'data': data, 'error': error})
 print(grand_list)
-
+## Test
 grand_list.to_csv('C:/Users/Nate Whitsett/Desktop/WASP18b_Phase_Curve')
