@@ -6,28 +6,183 @@ Created on Wed May 31 12:20:10 2023
 """
 
 from astropy.io import fits
+from astropy.timeseries import LombScargle as LS
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
-hdul = fits.open('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Grad School/Spring 2023/Research/MAST_2023-05-31T1318/TESS/tess2018206190142-s0001-s0003-0000000100100827/tess2018206190142-s0001-s0003-0000000100100827-00129_dvt.fits')
-#hdul.info()
-raw_data = hdul[1].data
 
-time = []
-phase = []
-data = []
-error = []
+def find_nearest(array, value):
+    array = np.asarray(array)
+    idx = (np.abs(array - value)).argmin()
+    return idx
 
-for tuples in raw_data:
-    time.append(tuples[0])
-    data.append(tuples[4])
-    error.append(tuples[5])
-for values in time:
-    phase.append(values % 0.94145455)
+def TESS_FITS_csv(input_file, csv_directory, csv_name=None):
+    '''
+
+    Parameters
+    ----------
+    input_file : string 
+        Directory to the TESS light curve fits (...lc.fits) file
+    csv_directory : string
+        Directory for output file.
+    csv_name : string, optional
+        Name for output csv file
+
+    Returns
+    -------
+    .cvs
+        Outputs the SAP_FLUX, PDCSAP_FLUX, and time parameters from the .fits file 
+        to an easily readable .csv file
+
+    '''
+    rev_file = input_file[::-1]
+    index = rev_file.index('/')
+    file = ((rev_file[:index])[::-1])[:-5]
+    if csv_name == None:
+        directory = csv_directory + '/' + file + '.csv'
+    elif csv_name != None:
+        directory = csv_directory + '/' + csv_name + '.csv'
+    hdul = fits.open(input_file)
+    time = hdul[1].data['TIME']
+    sap_flux = hdul[1].data['SAP_FLUX']
+    pdcsap_flux = hdul[1].data['PDCSAP_FLUX']
+
     
+    grand_list = pd.DataFrame({'time': time, 'sap_flux': sap_flux, 'pdcsap_flux': pdcsap_flux})
+    return grand_list.to_csv(directory)
 
-plt.plot(range(len(time)), time)
-grand_list = pd.DataFrame({'time': time, 'phase': phase, 'data': data, 'error': error})
-print(grand_list)
-## Test
-grand_list.to_csv('C:/Users/Nate Whitsett/Desktop/WASP18b_Phase_Curve')
+def TESS_data_extract(fits_lc_file, SAP_ERR=False, PDCSAP_ERR=False):
+    '''
+
+    Parameters
+    ----------
+    fits_lc_file : string
+        Directory of the TESS light curve fits file
+    SAP_ERR : bool, optional
+        True will return SAP_FLUX error. The default is False.
+    PDCSAP_ERR : bool, optional
+        True will return PDCSAP_FLUX error. The default is False.
+
+    Returns
+    -------
+    ND np.array
+        Returns an Nd array of the time, PDCSAP_FLUX, SAP_FLUX, and/or the
+        SAP_FLUX and PDCSAP_FLUX error. Min 3D array, max 5D array.
+
+    '''
+    hdul = fits.open(fits_lc_file)
+    time = hdul[1].data['TIME']
+    sap_flux = hdul[1].data['SAP_FLUX']
+    sap_flux_error = hdul[1].data['SAP_FLUX_ERR']
+    pdcsap_flux = hdul[1].data['PDCSAP_FLUX']
+    pdcsap_flux_error = hdul[1].data['PDCSAP_FLUX_ERR']
+    if SAP_ERR == False and PDCSAP_ERR == False:
+        return time, sap_flux, pdcsap_flux
+    if SAP_ERR == False and PDCSAP_ERR == True:
+        return time, sap_flux, pdcsap_flux, pdcsap_flux_error
+    if SAP_ERR == True and PDCSAP_ERR == False:
+        return time, sap_flux, sap_flux_error, pdcsap_flux
+    if SAP_ERR == True and PDCSAP_ERR == True:
+        return time, sap_flux, pdcsap_flux, sap_flux_error, pdcsap_flux
+
+
+def phase_folder(time, period, epoch):
+    '''
+
+    Parameters
+    ----------
+    time : np.array
+        The time array to be phase folded
+    period : float
+        The period of the planet, in the same units as the time array
+    epoch : float
+        The time of the first transit (i.e. transit epoch), same unit as time
+
+    Returns
+    -------
+    phase : np.array
+        Numpy array of the same dimension as the input time array, but phase
+        folded to the period of the planet. Transit centered at 0.
+
+
+    '''
+    phase = (time - (epoch+period/2)) % period
+    phase = phase - period/2
+    return phase
+
+def flare_ID(data, sigma, min_time = 3):
+    std_dev = np.std(data)
+    sigma = sigma*std_dev
+    mu = np.mean(data)
+    count = 0
+    flare_indices = []
+    flare_length = 0
+    flare = False
+    for flux in data:
+        if flux > (mu + sigma) and flare == False:
+            flare = True
+        if flare == True and flux > (mu+ 4*sigma):
+            flare = False
+        if flare == True and data[count: (count+ min_time)].sum()/min_time > (mu +sigma):
+            flare_length += 1
+        if flare == True and data[count: (count+min_time)].sum()/min_time < (mu +sigma):
+            flare = False
+            flare_indices.append(count-flare_length)
+        count += 1
+    return flare_indices
+
+def delete_nans(time, data):
+    time = time.tolist()
+    data = data.tolist()
+    nan_set = set()
+    count_data = 0
+    count_time = 0
+    for indices in data:
+        if np.isnan(indices) == True:
+            nan_set.add(count_data)
+        count_data += 1
+    for indices in time:
+        if np.isnan(indices) == True:
+            nan_set.add(count_time)
+        count_time += 1
+    time1 = [i for j, i in enumerate(time) if j not in nan_set]
+    data1 = [i for j, i in enumerate(data) if j not in nan_set]
+    time1 = np.array(time1)
+    data1 = np.array(data1)
+    return time1, data1
+
+def SMA_detrend(data, time_scale):
+    mov_average = []
+    j = 0
+    i = 0
+    for a in range(time_scale - 1):
+        window = data[a : 1 + a + j]
+        mov_average.append(sum(window)/(j+1))
+        j += 1
+    while i < len(data) - time_scale + 1:
+        window = data[i : i + time_scale]
+        window_average = round(sum(window) / time_scale, 2)
+        mov_average.append(window_average)
+        i += 1
+    SMA = np.array(mov_average)
+    return data - SMA
+        
+def flare_phase_folded_ID(phase, flare_array, period, epoch):
+    new_ID_list = []
+    for indices in flare_array:
+        new_ID_list.append(((time[indices] - (epoch+period/2)) % period)-period/2)
+    return np.array(new_ID_list)
+
+
+        
+
+a, sap_flux, pdcsap_flux = TESS_data_extract('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Grad School/Spring 2023/Research/HST Cycle 31/MAST Data/TOI 4306.01/TESS/tess2018292075959-s0004-0000000044898913-0124-s/tess2018292075959-s0004-0000000044898913-0124-s_lc.fits')
+time, flux = delete_nans(a, pdcsap_flux)
+detrend_flux = SMA_detrend(flux, 80)
+phase = phase_folder(time, 2.7299, 1413.2)
+flares = flare_ID(detrend_flux, 3, min_time=4)
+new_flares = flare_phase_folded_ID(phase, flares, 2.7299, 1413.2)
+# for phases in new_flares:
+#     plt.axvline(phases, c='green', linewidth=.5)
+plt.hist(new_flares)
+
