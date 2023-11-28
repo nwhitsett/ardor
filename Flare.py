@@ -9,10 +9,15 @@ from astropy.io import fits
 from astropy.timeseries import LombScargle as LS
 from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit
+from scipy.integrate import quad
 import numpy as np
 import pandas as pd
 import statistics as st
-
+import os
+import warnings
+import planck_law as pl
+import aflare
+warnings.filterwarnings("ignore")
 def exp_decay(x, a, b, c):
     '''
     
@@ -97,15 +102,15 @@ def TESS_data_extract(fits_lc_file, SAP_ERR=False, PDCSAP_ERR=False):
     sap_flux_error = hdul[1].data['SAP_FLUX_ERR']
     pdcsap_flux = hdul[1].data['PDCSAP_FLUX']
     pdcsap_flux_error = hdul[1].data['PDCSAP_FLUX_ERR']
-    pdcsap_flux_method = hdul[1].header['PDCMETHD']
+    #pdcsap_flux_method = hdul[1].header['PDCMETHD']
     if SAP_ERR == False and PDCSAP_ERR == False:
-        return time, sap_flux, pdcsap_flux, pdcsap_flux_method
+        return time, pdcsap_flux
     if SAP_ERR == False and PDCSAP_ERR == True:
-        return time, sap_flux, pdcsap_flux, pdcsap_flux_error, pdcsap_flux_method
+        return time, pdcsap_flux, pdcsap_flux_error
     if SAP_ERR == True and PDCSAP_ERR == False:
-        return time, sap_flux, sap_flux_error, pdcsap_flux, pdcsap_flux_method
+        return time, sap_flux, sap_flux_error, pdcsap_flux
     if SAP_ERR == True and PDCSAP_ERR == True:
-        return time, sap_flux, pdcsap_flux, sap_flux_error, pdcsap_flux, pdcsap_flux_method
+        return time, sap_flux, pdcsap_flux, sap_flux_error, pdcsap_flux
 
 
 def phase_folder(time, period, epoch):
@@ -144,10 +149,6 @@ def flare_ID(data, sigma):
         The detection sensitivity for flares, in standard deviations. 
         For example, a sigma value of 1.0 will count any data one standard
         deviation away from the mean as a potential flare
-    min_time : int, optional
-        The cadence of expected flares, in units of the time interval of the 
-        provided data. This is to avoid counting multiple high sigma data 
-        points from the same flare as multiple flares. The default is 3.
 
     Returns
     -------
@@ -156,27 +157,42 @@ def flare_ID(data, sigma):
         data. The index begins at the triggering data point.
 
     '''
-    std_dev = np.std(data)
-    sigma = sigma*std_dev
     mu = np.mean(data)
     count = 0
     flare_indices = []
     flare_length = 0
     flare_length_list = []
     flare = False
+    begin = 0
+    end = 1000
+    shift = 0
+    peak_index = 0
     for flux in data:
-        if flux > (mu + sigma) and flare == False:
+        if end >= len(data):
+            sig = sigma*np.std(data[begin:len(data)-1])
+        else:
+            sig = sigma*np.std(data[begin:end])
+        if flux > (mu + sig) and flare == False:
             flare = True
-        if flare == True and flux > (mu+ 4*sigma):
-            flare = False
-        if flare == True and data[count+1] > (mu +sigma)/3:
             flare_length += 1
-        if flare == True and data[count+1] < (mu +sigma)/3:
-            flare = False
-            flare_indices.append(count-flare_length)
-            flare_length_list.append(flare_length)
-            flare_length = 0
-        count += 1
+            peak_index = count
+        try:
+            if flare == True and data[count+1] > (mu + sig/3):
+                flare_length += 1
+            if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
+                flare = False
+                flare_indices.append(peak_index)
+                flare_length_list.append(flare_length)
+                flare_length = 0
+                peak_index = 0
+            count += 1
+            shift += 1
+            if shift == 50:
+                begin += 50
+                end += 50
+                shift = 0
+        except:
+            continue
     return flare_indices, flare_length_list
 
 def delete_nans(time, data):
@@ -222,7 +238,7 @@ def delete_nans(time, data):
     data1 = np.array(data1)
     return time1, data1
 
-def SMA_detrend(data, time_scale):
+def SMA_detrend(time, data, time_scale, LS_Iterations=3):
     '''
     
     This applies a windowed, Single Moving Average to detrend potentially
@@ -252,8 +268,23 @@ def SMA_detrend(data, time_scale):
         window_average = round(sum(window) / time_scale, 2)
         mov_average.append(window_average)
         i += 1
-    SMA = np.array(mov_average)
-    return (data - SMA), SMA
+    SMA = data - np.array(mov_average)
+    count = 0
+    ls = LS(time, SMA)
+    freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=1000, method='fast')
+    cutoff = ls.false_alarm_probability(power.max())
+    while cutoff < 0.99 and count <= LS_Iterations:
+        best_frequency = freq[np.argmax(power)]
+        ls = LS(time, SMA)
+        theta = ls.model_parameters(best_frequency)
+        offset = ls.offset()
+        design_matrix = ls.design_matrix(best_frequency, time)
+        SMA = SMA -( offset +design_matrix.dot(theta))
+        cutoff = ls.false_alarm_probability(power.max())
+        ls = LS(time, SMA)
+        freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=1000, method='fast')
+        count += 1
+    return SMA
         
 def flare_phase_folded_ID(phase, flare_array, period, epoch):
     new_ID_list = []
@@ -261,65 +292,204 @@ def flare_phase_folded_ID(phase, flare_array, period, epoch):
         new_ID_list.append(((phase[indices] - (epoch+period/2)) % period)-period/2)
     return np.array(new_ID_list)
 
+def bolo_flare_energy(parameters, Teff, R_stellar, planck_ratio, t_unit='days', function=exp_decay):
+    a, b, c = parameters
+    if t_unit == 'days':
+        multiplier = 86400
+        length_cap = 0.08333
+    if t_unit == 'minutes':
+        multiplier = 60
+        length_cap = 120
+    if function == exp_decay:
+        integral, err = quad(function, 0, length_cap, args=(a, b, (c-1)))
+    elif function == aflare.aflare1:
+        integral, err =quad(function, -length_cap, length_cap, args=(a, b, c))
+    energy = (5.67e-8)*(9000**4)*(integral)*np.pi*(R_stellar*6.957e8*R_stellar*6.957e8)*planck_ratio*(1e7)*multiplier
+    return energy
 
+    
+# flare_baseline = dict()
+# for T in range(2500, 6000):
+#     flare_baseline[T] = pl.planck_integrator(600e-9, 1000e-9, T)/pl.planck_integrator(600e-9, 1000e-9, 9000)
 
-file_path = 'C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/TOI 122.01/tess2018206045859-s0001-0000000231702397-0120-s/tess2018206045859-s0001-0000000231702397-0120-s_lc.fits'
-a, sap_flux, pdcsap_flux, method = TESS_data_extract(file_path)
-ID = file_path[::-1]
-ID2 = ID[15:24]
-TESS_ID = ID2[::-1]
-time, flux = delete_nans(a, pdcsap_flux)
-detrend_flux, detrend_array = SMA_detrend(flux, 100)
-median = st.median(detrend_flux.tolist())
-detrend_flux = detrend_flux / median
-# phase = phase_folder(time, 2.7299, 1413.2)
-flares, lengths = flare_ID(detrend_flux, 3)
-# new_flares = flare_phase_folded_ID(phase, flares, 2.7299, 1413.2)
+# TESS_Folder_ID = [x[1] for x in os.walk('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/')]
+# TOI_Catalog = pd.read_csv('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/csv-file-toi-catalog.csv')
+# total_flares = 0
+# total_possible_flares = 0
+# total_observation_time = 0
+# flare_lengths = []
 
-parameter_list = []
-chi_square = []
-# plt.plot(time, detrend_flux)
-# for events in flares:
-#     plt.axvline(time[events], c='green', linewidth=0.5)
-count = 0
-acceptable_flare = 0
-possible_flares = len(flares)
-dataframe_export = pd.DataFrame()
-for events in flares:
-    detrend_correction = detrend_array
-    normalized_time = time - time[events]
-    new_time = normalized_time.tolist()
-    new_data = detrend_flux.tolist()
-    if lengths[count] >= 25 and lengths[count] <= 35:
-        new_time = np.array(new_time[events-5:events+30])*24*60
-        new_data = np.array(new_data[events-5:events+30])
-        detrend_correction = detrend_array[events-5:events+30]
-        chi2_cutoff = 20.599
-    if lengths[count] >= 15 and lengths[count] < 25:
-        new_time = np.array(new_time[events-5:events+20])*24*60
-        new_data = np.array(new_data[events-5:events+20])
-        detrend_array = detrend_array[events-5:events+20]
-        chi2_cutoff = 10.085
-    if lengths[count] > 5 and lengths[count] < 15:
-        new_time = np.array(new_time[events-5:events+10])*24*60
-        new_data = np.array(new_data[events-5:events+10])
-        detrend_correction = detrend_array[events-5:events+10]
-        chi2_cutoff = 2.833
-    else:
-        new_time = np.array(new_time[events-5:events+7])*24*60
-        new_data = np.array(new_data[events-5:events+7])
-        detrend_correction = detrend_array[events-5:events+7]
-        chi2_cutoff = 1.064
-    new_data = new_data - np.mean(new_data)
-    popt, pcov = curve_fit(exp_decay, new_time[5:15], new_data[5:15], maxfev=5000)
-    half_max = new_data[5]/2
-    amp = new_data.max()
-    FWHMt = np.log((half_max - popt[2])/popt[0])/(-popt[1]) 
-    squares = (new_data[5:15] - exp_decay(new_time[5:15], *popt))**2/(np.var(new_data[5:15]))
-    chi_squared = np.sum(squares)
-    if chi_squared < chi2_cutoff:
-        dataframe_export['Flare ' + str(events) + ' Time'] = new_time
-        dataframe_export['Flare ' + str(events) + ' Data'] = new_data
-        dataframe_export['Flare ' + str(events) + ' Detrend Correction'] = detrend_correction
-        dataframe_export.reset_index()
-        dataframe_export.to_csv('C:/Users/Nate Whitsett/Desktop/Flares/TOI 122.01/Flares.csv', index=False)
+# TOI_ID_list = []
+# flare_number = []
+# peak_time = []
+# amplitude = []
+# time_scale = []
+# Teff = []
+# radius = []
+# flare_phase = []
+# total_flare_energies = []
+# total_flare_phases = []
+# item_count = 0
+# for M_dwarves in TESS_Folder_ID[0]:
+#     if M_dwarves.endswith('.01') == True:
+        
+#         ##Iteration Scheme
+#         TOI_ID = float(M_dwarves[3::])
+#         a = os.listdir('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/' + M_dwarves)
+#         # os.mkdir('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New/' + M_dwarves + '/')
+#         print(item_count, M_dwarves)
+        
+#         ##Relevant parameters from TOI catalog
+#         period = np.array(TOI_Catalog.loc[TOI_Catalog['Full TOI ID'] == TOI_ID, 'Orbital Period Value'])[0]
+#         epoch = np.array(TOI_Catalog.loc[TOI_Catalog['Full TOI ID'] == TOI_ID, 'Epoch Value'])[0]
+#         luminosity = np.array(TOI_Catalog.loc[TOI_Catalog['Full TOI ID'] == TOI_ID, 'Luminosity'])[0]
+#         stellar_radius = np.array(TOI_Catalog.loc[TOI_Catalog['Full TOI ID'] == TOI_ID, 'Star Radius Value'])[0]
+#         T = np.array(TOI_Catalog.loc[TOI_Catalog['Full TOI ID'] == TOI_ID, 'Effective Temperature Value'])[0]
+#         if T == '':
+#             T = 2501
+#         if stellar_radius == '':
+#             stellar_radius = 0.5
+#         flare_count = 1
+        
+#         ##Trackable values per star
+#         phase_folded_flare_list = []
+#         flare_amplitude = []
+#         flare_time_scale = []
+#         flare_energy = []
+#         accepted_flare_index = []
+#         flare_phase = []
+#         accepted_flare_number = []
+#         observation_time = 0
+#         possible_flares = 0
+#         for folders in a:
+#             b, pdcsap_flux, pdcsap_error = TESS_data_extract('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
+#             time, flux = delete_nans(b, pdcsap_flux)
+#             detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
+#             plt.clf()
+#             flares, lengths = flare_ID(detrend_flux, 3)
+#             if folders.endswith('a_fast-lc.fits') == True:
+#                 observation_time += len(time)*(0.33333333)
+#                 total_observation_time += len(time)*(0.33333333)
+#             elif folders.endswith('a_fast-lc.fits') == False:  
+#                 observation_time += len(time)*2
+#                 total_observation_time += len(time)*2
+#             index = 0
+#             possible_flares += len(flares)
+#             total_possible_flares += len(flares)
+    
+#             for flare_events in flares:
+#                 if flare_events >= 100 and len(flux) - flare_events > 100:
+#                     new_time = time[flare_events-100:flare_events+100]
+#                     new_data = flux[flare_events-100:flare_events+100]
+#                 elif flare_events < 100:
+#                     new_time = time[0+flare_events:flare_events+100]
+#                     new_data = flux[0+flare_events:flare_events+100]
+#                 elif len(flux) - flare_events < 100:
+#                     new_time = time[flare_events:]
+#                     new_data = flux[flare_events:]
+#                 if period != '':
+#                     phase = phase_folder(new_time, period, epoch)
+#                 elif period == '':
+#                     phase = ''
+#                 new_error = pdcsap_error[flare_events-100:flare_events+100]
+#                 recenter = np.max(new_data[int(len(new_data)/2-10):int(len(new_data)/2+10)])
+#                 c, d =flare_ID(np.array(new_data), 3)
+#                 norm_time = time[flare_events]
+#                 events = np.where(new_data == recenter)[0][0]
+#                 flare_phase_value = phase[events]
+#                 criteria1 = False
+#                 if recenter > np.mean(new_data)+3*(np.std(new_data)):
+#                     criteria1 = True
+#                 if criteria1 == True and new_data[events+1] > np.mean(new_data)+2*(np.std(new_data)) and len(c) > 0:
+#                     new_time = (new_time - new_time[events])*24*60
+#                     if lengths[index] >= 25:
+#                         # new_time = np.array(new_time[events-10:events+50])*24*60
+#                         # new_data = np.array(new_data[events-10:events+50])
+#                         alles_data = new_data/np.median(new_data)
+#                         BJD_time = time[events-10:events+50]
+#                         error = new_error/np.median(new_data)
+#                         popt, pcov = curve_fit(exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
+#                         squares = (alles_data[events:events+30] - exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
+#                         chi2_cutoff = 18
+#                         plt.clf()
+#                     elif lengths[index] >= 15 and lengths[index] < 25:
+#                         # new_time = np.array(new_time[events-10:events+30])*24*60
+#                         # new_data = np.array(new_data[events-10:events+30])
+#                         alles_data = new_data/np.median(new_data)
+#                         BJD_time = time[events-10:events+30]
+#                         error = new_error/np.median(new_data)
+#                         popt, pcov = curve_fit(exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
+#                         squares = (alles_data[events:events+20] - exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
+#                         chi2_cutoff = 9.5
+#                         plt.clf()
+#                     elif lengths[index] > 5 and lengths[index] < 15:
+#                         # new_time = np.array(new_time[events-10:events+20])*24*60
+#                         # new_data = np.array(new_data[events-10:events+20])
+#                         alles_data = new_data/np.median(new_data)
+#                         BJD_time = time[events-10:events+20]
+#                         error = new_error/np.median(new_data)
+#                         popt, pcov = curve_fit(exp_decay, new_time[events:events+10], alles_data[events:events+10], maxfev=5000)
+#                         squares = (alles_data[events:events+10] - exp_decay(new_time[events:events+10], *popt))**2/(np.var(alles_data[events:events+10]))
+#                         chi2_cutoff = 2.167
+#                     elif lengths[index] <= 5:
+#                         # new_time = np.array(new_time[events-10:events+14])*24*60
+#                         # new_data = np.array(new_data[(events-10):(events+14)])
+#                         alles_data = new_data/np.median(new_data)
+#                         BJD_time = time[events-10:events+14]
+#                         error = new_error/np.median(new_data)
+#                         popt, pcov = curve_fit(exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
+#                         squares = (alles_data[events:events+7] - exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
+#                         chi2_cutoff = 1.2
+#                         plt.clf()
+#                     chi_squared = np.sum(squares)
+#                     if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
+#                         half_max = (alles_data[8:15].max()-np.median(alles_data[0:8]))/2
+#                         time_scale.append(popt[1])
+#                         flare_time_scale.append(popt[1])
+#                         amplitude.append(popt[0])
+#                         flare_amplitude.append(popt[0])
+#                         peak_time.append(norm_time)
+                        
+#                         TOI_ID_list.append(TOI_ID)
+#                         flare_number.append(flare_count)
+#                         try:
+#                             energy = bolo_flare_energy(popt, T, stellar_radius, flare_baseline[T], t_unit='days')
+#                         except:
+#                             energy = np.NaN
+#                         flare_energy.append(energy)
+#                         total_flare_energies.append(energy)
+#                         Teff.append(T)
+#                         radius.append(stellar_radius)
+#                         X = np.column_stack((new_time[events-30:events+40], alles_data[events-30:events+40], error[events-30:events+40]))
+#                         baseline = st.median(new_data)*(lengths[index])*2
+#                         median = st.median(new_data)
+#                         flare_phase.append(flare_phase_value)
+#                         accepted_flare_index.append(flares[index])
+#                         accepted_flare_number.append(flare_count)
+#                         total_flare_phases.append(flare_phase_value)
+#                         print(flare_count)
+#                         if lengths[index] > 5:
+#                             print('Flare ' + str(flare_count) + ' length: ' + str(lengths[index]))
+#                         # np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New/' + M_dwarves + '/Flare' + str(flare_count) + '.csv', X, delimiter=',')
+#                         flare_count += 1
+#                         total_flares += 1
+                        
+                            
+#                 index += 1
+#         # Y = np.column_stack((flare_amplitude, flare_time_scale, flare_energy))
+#         # Z = np.column_stack((np.array(flare_phase), accepted_flare_index))
+#         # if np.std(flare_phase)/period < 0.2 and len(np.array(flare_phase)) > 5:
+#         #     print(M_dwarves + ': Phase Flag')
+#         # np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New/' + M_dwarves + '/All_Flares.csv', Y, delimiter=',')
+#         # np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New/' + M_dwarves + '/Flare_Phase.csv', Z, delimiter=',')
+#         # f = open('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New/' + M_dwarves + '/Host_Statistics.txt', 'w')
+#         # f.write('Flares/Day: ' + str(flare_count*60*24/observation_time) + '\n' + 'Possible Flares: ' + str(possible_flares) + '\n' +
+#         #         'Accepted Flares: ' + str(flare_count) + '\n' + 'Accepted/Possible Flares: ' + str(flare_count/possible_flares) + '\n' +
+#         #         'Observation Time (min): ' + str(observation_time))
+#         # f.close()
+#         item_count += 1
+# ZZ = np.column_stack((TOI_ID_list, flare_number, peak_time, amplitude, time_scale, total_flare_energies, Teff, radius))
+# np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Grand Flare List (New).csv', ZZ, delimiter=',')
+# g = open('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/All_statistics (New).txt', 'w')
+# g.write('Total Flares: ' + str(total_flares) + '\n' + 'Net Observation Time (Days): ' + str(total_observation_time/(60*24)))
+# g.close()
