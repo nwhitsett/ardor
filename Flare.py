@@ -15,7 +15,7 @@ import pandas as pd
 import statistics as st
 import os
 import warnings
-import planck_law as pl
+#import planck_law as pl
 import aflare
 warnings.filterwarnings("ignore")
 def exp_decay(x, a, b, c):
@@ -72,9 +72,9 @@ def TESS_FITS_csv(input_file, csv_directory, csv_name=None):
     time = hdul[1].data['TIME']
     sap_flux = hdul[1].data['SAP_FLUX']
     pdcsap_flux = hdul[1].data['PDCSAP_FLUX']
-
+    pdcsap_flux_err = hdul[1].data['PDCSAP_FLUX_ERR']
     
-    grand_list = pd.DataFrame({'time': time, 'sap_flux': sap_flux, 'pdcsap_flux': pdcsap_flux})
+    grand_list = pd.DataFrame({'time': time, 'sap_flux': sap_flux, 'pdcsap_flux': pdcsap_flux, 'pdcsap_flux_err': pdcsap_flux_err})
     return grand_list.to_csv(directory)
 
 def TESS_data_extract(fits_lc_file, SAP_ERR=False, PDCSAP_ERR=False):
@@ -307,7 +307,7 @@ def bolo_flare_energy(parameters, Teff, R_stellar, planck_ratio, t_unit='days', 
     energy = (5.67e-8)*(9000**4)*(integral)*np.pi*(R_stellar*6.957e8*R_stellar*6.957e8)*planck_ratio*(1e7)*multiplier
     return energy
 
-    
+TESS_FITS_csv('/data/whitsett.n/SP-Interact/tess2018206045859-s0001-0000000234994474-0120-s_lc.fits', '/data/whitsett.n/SP-Interact/')
 # flare_baseline = dict()
 # for T in range(2500, 6000):
 #     flare_baseline[T] = pl.planck_integrator(600e-9, 1000e-9, T)/pl.planck_integrator(600e-9, 1000e-9, 9000)
@@ -365,7 +365,6 @@ def bolo_flare_energy(parameters, Teff, R_stellar, planck_ratio, t_unit='days', 
 #             b, pdcsap_flux, pdcsap_error = TESS_data_extract('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
 #             time, flux = delete_nans(b, pdcsap_flux)
 #             detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
-#             plt.clf()
 #             flares, lengths = flare_ID(detrend_flux, 3)
 #             if folders.endswith('a_fast-lc.fits') == True:
 #                 observation_time += len(time)*(0.33333333)
@@ -411,7 +410,6 @@ def bolo_flare_energy(parameters, Teff, R_stellar, planck_ratio, t_unit='days', 
 #                         popt, pcov = curve_fit(exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
 #                         squares = (alles_data[events:events+30] - exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
 #                         chi2_cutoff = 18
-#                         plt.clf()
 #                     elif lengths[index] >= 15 and lengths[index] < 25:
 #                         # new_time = np.array(new_time[events-10:events+30])*24*60
 #                         # new_data = np.array(new_data[events-10:events+30])
@@ -421,7 +419,6 @@ def bolo_flare_energy(parameters, Teff, R_stellar, planck_ratio, t_unit='days', 
 #                         popt, pcov = curve_fit(exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
 #                         squares = (alles_data[events:events+20] - exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
 #                         chi2_cutoff = 9.5
-#                         plt.clf()
 #                     elif lengths[index] > 5 and lengths[index] < 15:
 #                         # new_time = np.array(new_time[events-10:events+20])*24*60
 #                         # new_data = np.array(new_data[events-10:events+20])
@@ -440,7 +437,6 @@ def bolo_flare_energy(parameters, Teff, R_stellar, planck_ratio, t_unit='days', 
 #                         popt, pcov = curve_fit(exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
 #                         squares = (alles_data[events:events+7] - exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
 #                         chi2_cutoff = 1.2
-#                         plt.clf()
 #                     chi_squared = np.sum(squares)
 #                     if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
 #                         half_max = (alles_data[8:15].max()-np.median(alles_data[0:8]))/2
