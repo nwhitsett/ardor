@@ -8,11 +8,13 @@ Created on Thu Nov  2 11:48:26 2023
 import pandas as pd
 from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit
+from scipy.integrate import simpson
 import numpy as np
 import pandas as pd
 import os
 import aflare
 import math
+import planck_law
 
 def find_nearest(array, value):
     array = np.asarray(array)
@@ -52,48 +54,56 @@ def exp_decay(x, a, b, c):
     '''
     return a * np.exp(-b * x) + c
 def allesfitter_priors(flare_csv, time_unit='min'):
-    if time_unit == 'min':
-        time_unit = 1140
-    if time_unit == 'days':
-        time_unit = 1
     flare = pd.read_csv(flare_csv, header=None)
+    count = 0
+    for vals in flare[0]:
+        if np.log10(np.abs(vals)) > 2:
+            count += 1
+    flare.drop(index=flare.index[:count], axis=0, inplace=True)
+    flare.reset_index(inplace=True, drop=True)
     time = flare[0]
-    flux_median = np.median(flare[1][:25])
-    flux = flare[1] - flux_median
-    params, pcov = curve_fit(exp_decay, time[30:], flux[30:])
-    param_error = np.sqrt(np.diag(pcov))
-    x = np.linspace(0, 10, num = 2000)/(time_unit)
+    flux = flare[1] - 1.0
+    print(flare)
+    try:
+        if np.abs(time[0]) > 1:
+            params, pcov = curve_fit(exp_decay, time[(30-count):], flux[(30-count):], maxfev=5000)
+            time_unit = 1140
+        elif np.abs(time[0]) < 1:
+            params, pcov = curve_fit(exp_decay, time[(30-count):]*1140, flux[(30-count):], maxfev=5000)
+            time_unit = 1
+    except:
+        params = (0, 5.0, 0.01)
+    x = np.linspace(0, 10, num = 1500)/(1140)
     y = exp_decay(x, params[0], params[1]*time_unit, params[2])
     amp, idx = find_nearest(y, y.max()/2)
-    amp = 2*amp
+    amp = flux.max()
     tau = x[idx]
-    plt.scatter(time/time_unit, flux)
-    error = param_error[1]/time_unit
-    x_aflare = np.linspace(-0.02, 0.04, num=1000)
-    y_aflare = aflare.aflare1(x_aflare, 0, tau, amp)
-    plt.plot(x,y)
-    plt.plot(x_aflare, y_aflare)
-    return amp, tau, error*10
+    for index in range(len(flare[2])):
+        if math.isnan(flare[2][index]) == True:
+            flare[2][index] = 1e-3
+    if np.abs(flare[0][0]) > 1:
+        flare[0] = flare[0]/time_unit
+    flare.to_csv(flare_csv, index=False, header=False)
+    return amp, tau
 
 def flare_params(data_file_dir, params_template_dir, output_dir, flares=1):
-    amp, tau, tau_error = allesfitter_priors(data_file_dir)
+    amp, tau = allesfitter_priors(data_file_dir)
     data = pd.read_csv(data_file_dir, index_col = False, header=None)
     error = data[2]
     for index in range(len(error)):
         if math.isnan(error[index]) == True:
             error[index] = 1e-3
-    flux_err = np.log10(np.median(error))
+    flux_err = np.log(np.median(error))
     params = pd.read_csv(params_template_dir, index_col=False)
     name = (data_file_dir.rsplit('/', 1)[1])[:-4]
     params.at[1, 'value'] = 0
     params.at[2, 'value'] = tau
     params.at[3, 'value'] = amp
-    params.at[5, 'value'] = np.log10(np.median(error))
-    
-    params.at[1, 'bounds'] = 'uniform ' + str(-0.0001) + ' ' + str(0.0001)
-    params.at[2, 'bounds'] = 'uniform ' + str(amp-0.5) + ' ' + str(amp+0.05)
-    params.at[3, 'bounds'] = 'uniform ' + str(tau-tau_error) + ' ' + str(tau + tau_error)
-    params.at[5, 'bounds'] = 'uniform ' + str(flux_err - 1) + ' ' + str(flux_err + 1)
+    params.at[5, 'value'] = flux_err
+    params.at[1, 'bounds'] = 'uniform ' + str(-0.001) + ' ' + str(0.001)
+    params.at[2, 'bounds'] = 'uniform ' + str(0) + ' ' + str(2.5*tau)
+    params.at[3, 'bounds'] = 'uniform ' + str(amp*0.95) + ' ' + str(3.5*amp)
+    params.at[5, 'bounds'] = 'uniform ' + str(-1 + flux_err) + ' ' + str(1 + flux_err)
     # if flares > 1:
     #     for number in range(2, flares+1):
     #         params.at[1+3*(number-1), '#name'] = 'flare_tpeak_' + str(number)
@@ -105,9 +115,29 @@ def flare_params(data_file_dir, params_template_dir, output_dir, flares=1):
     #     params.at[6+3*(flares-1), 'label'] = '$\log{\sigma_\mathrm{' + str(name) + '}}$'
     # else:
     params.at[5, '#name'] = '#errors (overall scaling) per instrument'
-    params.at[5, '#name'] = 'log_err_flux_' + str(name)
-    params.at[5, 'label'] = '$\log{\sigma_\mathrm{' + str(name) + '}}$'
+    params.at[5, '#name'] = 'ln_err_flux_' + str(name)
+    params.at[5, 'label'] = '$\ln{\sigma_\mathrm{' + str(name) + '}}$'
     params.to_csv(output_dir, index=False)
 
+def return_parameters(mcmc_table_dir):
+    data = pd.read_csv(mcmc_table_dir)
+    t_peak = data['median'][1]
+    t_peak_m = data['lower_error'][1]
+    t_peak_p = data['upper_error'][1]
+    fwhm = data['median'][2]
+    fwhm_m = data['lower_error'][2]
+    fwhm_p = data['upper_error'][2]
+    amp = data['median'][3]
+    amp_m = data['lower_error'][3]
+    amp_p = data['upper_error'][3]
 
-allesfitter_priors('C:/Users/natha/OneDrive - Washington University in St. Louis/Desktop/Flares_New/TOI 136.01/Flare5.csv')
+    return [t_peak, t_peak_m, t_peak_p, fwhm, fwhm_m, fwhm_p, amp, amp_m, amp_p]
+
+def flare_energy(fwhm, ampl, Teff, R_stellar):
+    x = np.linspace(0, 0.02, num = 2000)
+    y = aflare.aflare1(x, 0.01, fwhm, ampl)
+    flare_area = simpson(y, x)
+    print(fwhm, ampl, Teff, R_stellar)
+    color_factor = planck_law.planck_integrator(600e-6, 1000e-6, Teff)/planck_law.planck_integrator(600e-6, 1000e-6, 9000)
+    energy = (5.67e-8)*(9000**4)*(flare_area)*np.pi*(R_stellar*6.957e8*R_stellar*6.957e8)*color_factor*(1e7)*86400
+    return energy
