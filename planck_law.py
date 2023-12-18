@@ -28,28 +28,28 @@ def planck_integrator(lambda_min, lambda_max, Teff):
     integral2 = simpson(np.array(R_A), lambda_range)
     return integral2
 
-TOI_List = pd.read_csv('C:/Users/natha/OneDrive/Desktop/Kepler_Field.csv')
-TOI_Teff = TOI_List['st_teff']
-TOI_TESS_Mag = TOI_List['sy_tmag']
-TOI_AB_Mag = []
-T_eff_range = np.linspace(3000, 8000)
-ratio = []
-for index in T_eff_range:
-    ratio.append(planck_integrator(0.23e-6, 0.29e-6, index)/planck_integrator(0.6e-6, 1e-6, index))
-# for index in range(len(TOI_Teff)):
-#     TOI_AB_Mag.append(-2.5*np.log10((2461*10**(-.4*TOI_TESS_Mag[index]))*(planck_integrator(0.23e-6, 0.29e-6, TOI_Teff[index])/planck_integrator(0.6e-6, 1e-6, TOI_Teff[index]))) + 8.9)
-# TOI_List['AB Mag'] = np.array(TOI_AB_Mag)
-# TOI_List.to_csv('C:/Users/natha/OneDrive/Desktop/All_Exoplanets.csv', index=False)
-TOI_AB_Mag = TOI_List['AB Mag']
-TOI_Dist = TOI_List['sy_dist']
-bins = np.linspace(5, 25, num=15)
-plt.title('Kepler Field TESS Mag vs ULTRASAT AB Mag')
-plt.hist(TOI_TESS_Mag, bins, alpha=0.5, label='TESS Magnitude')
-plt.hist(TOI_AB_Mag, bins, alpha=0.5, label='AB Magnitude')
-# plt.hist(ratio, bins)
-plt.legend()
-plt.xlabel('Magnitude')
-plt.ylabel('Count')
-plt.axvline(21.8, linestyle='dashed', linewidth=1)
-plt.show()
+# TOI_List = pd.read_csv('C:/Users/natha/OneDrive/Desktop/Kepler_Field.csv')
+# TOI_Teff = TOI_List['st_teff']
+# TOI_TESS_Mag = TOI_List['sy_tmag']
+# TOI_AB_Mag = []
+# T_eff_range = np.linspace(3000, 8000)
+# ratio = []
+# for index in T_eff_range:
+#     ratio.append(planck_integrator(0.23e-6, 0.29e-6, index)/planck_integrator(0.6e-6, 1e-6, index))
+# # for index in range(len(TOI_Teff)):
+# #     TOI_AB_Mag.append(-2.5*np.log10((2461*10**(-.4*TOI_TESS_Mag[index]))*(planck_integrator(0.23e-6, 0.29e-6, TOI_Teff[index])/planck_integrator(0.6e-6, 1e-6, TOI_Teff[index]))) + 8.9)
+# # TOI_List['AB Mag'] = np.array(TOI_AB_Mag)
+# # TOI_List.to_csv('C:/Users/natha/OneDrive/Desktop/All_Exoplanets.csv', index=False)
+# TOI_AB_Mag = TOI_List['AB Mag']
+# TOI_Dist = TOI_List['sy_dist']
+# bins = np.linspace(5, 25, num=15)
+# plt.title('Kepler Field TESS Mag vs ULTRASAT AB Mag')
+# plt.hist(TOI_TESS_Mag, bins, alpha=0.5, label='TESS Magnitude')
+# plt.hist(TOI_AB_Mag, bins, alpha=0.5, label='AB Magnitude')
+# # plt.hist(ratio, bins)
+# plt.legend()
+# plt.xlabel('Magnitude')
+# plt.ylabel('Count')
+# plt.axvline(21.8, linestyle='dashed', linewidth=1)
+# plt.show()
 
