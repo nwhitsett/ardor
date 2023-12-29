@@ -4,10 +4,9 @@ Created on Wed May 31 12:20:10 2023
 
 @author: Nate Whitsett
 """
-
 from astropy.io import fits
 from astropy.timeseries import LombScargle as LS
-from matplotlib import pyplot as plt
+# from matplotlib import pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.integrate import quad
 import numpy as np
@@ -157,21 +156,22 @@ def flare_ID(data, sigma):
         data. The index begins at the triggering data point.
 
     '''
-    mu = np.mean(data)
     count = 0
     flare_indices = []
     flare_length = 0
     flare_length_list = []
     flare = False
     begin = 0
-    end = 1000
+    end = 250
     shift = 0
     peak_index = 0
     for flux in data:
         if end >= len(data):
             sig = sigma*np.std(data[begin:len(data)-1])
+            mu = np.mean(data[begin:len(data)-1])
         else:
             sig = sigma*np.std(data[begin:end])
+            mu = np.mean(data[begin:end])
         if flux > (mu + sig) and flare == False:
             flare = True
             flare_length += 1
@@ -187,9 +187,9 @@ def flare_ID(data, sigma):
                 peak_index = 0
             count += 1
             shift += 1
-            if shift == 50:
-                begin += 50
-                end += 50
+            if shift == 10:
+                begin += 10
+                end += 10
                 shift = 0
         except:
             continue
@@ -464,9 +464,8 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
         index += 1
     return host_ID_list, accepted_flare_number, peak_time, flare_amplitude, flare_time_scale, flare_energy, Teff, radius, flare_phase, flare_count
 
-
-TESS_Folder_ID = [x[1] for x in os.walk('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/Periastron_Hosts/')]
-TOI_Catalog = pd.read_csv('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Periastron_hosts.csv')
+TESS_Folder_ID = os.listdir('/data/whitsett.n/TESS_Light_Curves/All_TOI/')
+TOI_Catalog = pd.read_csv('/data/whitsett.n/Reference_Files/All_TOI_12_17_23.csv')
 total_flares = 0
 total_possible_flares = 0
 total_observation_time = 0
@@ -485,29 +484,30 @@ item_count = 0
 total_periastron_list = []
 total_periastron_epoch_list = []
 total_epoch_list = []
-
-for M_dwarves in TESS_Folder_ID[0][333:]:
+list_index = 0
+for M_dwarves in TESS_Folder_ID[1270:]:
     ##Iteration Scheme
     TOI_ID = M_dwarves
-    a = os.listdir('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/Periastron_Hosts/' + M_dwarves)
-    os.mkdir('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New_New/Periastron/' + M_dwarves + '/')
+    print(TOI_ID)
+
+    a = os.listdir('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves)
+    os.mkdir('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/')
     print(item_count, M_dwarves)
-    
     ##Relevant parameters from TOI catalog
-    period = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'pl_orblper'])[0]
-    epoch = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'pl_tranmid'])[0]
-    stellar_radius = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'st_rad'])[0]
-    T = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'st_teff'])[0]
-    periastron = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'pl_orbper'])[0]
-    epoch_periastron = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'pl_orbtper'])[0]
+    period = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == float(M_dwarves), 'pl_orbper'])[0]
+    epoch = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == float(M_dwarves), 'pl_tranmid'])[0]
+    stellar_radius = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == float(M_dwarves), 'st_rad'])[0]
+    T = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == float(M_dwarves), 'st_teff'])[0]
+    # periastron = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'pl_orbper'])[0]
+    # epoch_periastron = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == TOI_ID, 'pl_orbtper'])[0]
     if T == '':
         T = np.NAN
     if stellar_radius == '':
-        stellar_radius = 0.5
-    if epoch_periastron == '':
-        epoch_periastron = np.NAN
-    if periastron == '':
-        periastron = np.NAN
+        stellar_radius = np.NAN
+    # if epoch_periastron == '':
+    #     epoch_periastron = np.NAN
+    # if periastron == '':
+    #     periastron = np.NAN
     if epoch == '':
         epoch = np.NAN
     flare_count = 1
@@ -522,8 +522,8 @@ for M_dwarves in TESS_Folder_ID[0][333:]:
     accepted_flare_number = []
     observation_time = 0
     possible_flares = 0
-    periastron_list = []
-    periastron_epoch_list = []
+    # periastron_list = []
+    # periastron_epoch_list = []
     epoch_list = []
     
     ##Total Trackable Lists for all Data
@@ -539,12 +539,14 @@ for M_dwarves in TESS_Folder_ID[0][333:]:
     total_flare_energies = []
     total_flare_phases = []
     item_count = 0
-    total_periastron_list = []
-    total_periastron_epoch_list = []
+    # total_periastron_list = []
+    # total_periastron_epoch_list = []
     total_epoch_list = []
     for folders in a:
-        b, pdcsap_flux, pdcsap_error = TESS_data_extract('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/Periastron_Hosts/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
-
+        try:
+            b, pdcsap_flux, pdcsap_error = TESS_data_extract('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
+        except:
+            continue
         time, flux = delete_nans(b, pdcsap_flux)
         detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
         flares, lengths = flare_ID(detrend_flux, 3)
@@ -629,7 +631,10 @@ for M_dwarves in TESS_Folder_ID[0][333:]:
                     total_flare_energies.append(energy)
                     Teff.append(T)
                     radius.append(stellar_radius)
-                    X = np.column_stack((new_time[events-30:events+40], alles_data[events-30:events+40], error[events-30:events+40]))
+                    try:
+                        X = np.column_stack((new_time[events-30:events+40], alles_data[events-30:events+40], error[events-30:events+40]))
+                    except:
+                        X = np.column_stack(([0],[0],[0]))
                     baseline = st.median(new_data)*(lengths[index])*2
                     median = st.median(new_data)
                     flare_phase.append(flare_phase_value)
@@ -637,36 +642,39 @@ for M_dwarves in TESS_Folder_ID[0][333:]:
                     accepted_flare_number.append(flare_count)
                     total_flare_phases.append(flare_phase_value)
                     TOI_period.append(period)
-                    total_periastron_list.append(periastron)
-                    total_periastron_epoch_list.append(epoch_periastron)
-                    periastron_list.append(periastron)
-                    periastron_epoch_list.append(epoch_periastron)
+                    # total_periastron_list.append(periastron)
+                    # total_periastron_epoch_list.append(epoch_periastron)
+                    # periastron_list.append(periastron)
+                    # periastron_epoch_list.append(epoch_periastron)
                     total_epoch_list.append(epoch)
                     epoch_list.append(epoch)
                     print(flare_count)
                     if lengths[index] > 5:
                         print('Flare ' + str(flare_count) + ' length: ' + str(lengths[index]))
-                    np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New_New/Periastron/' + M_dwarves + '/Flare' + str(flare_count) + '.csv', X, delimiter=',')
+                    np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Flare' + str(flare_count) + '.csv', X, delimiter=',')
                     flare_count += 1
                     total_flares += 1
                     
                         
             index += 1
+    if observation_time == 0:
+        observation_time = -1
+    if possible_flares == 0 :
+        possible_flares = -1
     Y = np.column_stack((flare_amplitude, flare_time_scale, flare_energy))
-    Z = np.column_stack((np.array(flare_phase), periastron_list, periastron_epoch_list, epoch_list))
-    np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New_New/Periastron/' + M_dwarves + '/All_Flares.csv', Y, delimiter=',')
-    np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New_New/Periastron/' + M_dwarves + '/Flare_Phase.csv', Z, delimiter=',')
-    f = open('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flares_New_New/Periastron/' + M_dwarves + '/Host_Statistics.txt', 'w')
+    np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/All_Flares.csv', Y, delimiter=',')
+    f = open('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Host_Statistics.txt', 'w')
     f.write('Flares/Day: ' + str(flare_count*60*24/observation_time) + '\n' + 'Possible Flares: ' + str(possible_flares) + '\n' +
             'Accepted Flares: ' + str(flare_count) + '\n' + 'Accepted/Possible Flares: ' + str(flare_count/possible_flares) + '\n' +
             'Observation Time (min): ' + str(observation_time))
     f.close()
     item_count += 1
-    ZZ = np.column_stack((TOI_ID_list, flare_number, peak_time, amplitude, time_scale, total_flare_energies, Teff, radius, TOI_period, total_flare_phases, total_periastron_list, total_periastron_epoch_list, total_epoch_list))
-    with open("C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flare Output Files/Periastron_Flares_2.csv", "a") as f:
+    ZZ = np.column_stack((TOI_ID_list, flare_number, peak_time, amplitude, time_scale, total_flare_energies, Teff, radius, TOI_period))
+    with open("/data/whitsett.n/Tier_3/All_TOI/All_TOI_Flares2.csv", "a") as f:
         np.savetxt(f, ZZ, delimiter=",", fmt='%s')
         f.close()
-    print(len(TOI_ID_list), len(flare_number), len(peak_time), len(amplitude), len(time_scale), len(total_flare_energies), len(Teff), len(radius), len(total_flare_phases), len(TOI_period), len(total_epoch_list), len(total_periastron_epoch_list), len(total_periastron_list))
-g = open('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/All_statistic_Periastron.txt', 'w')
+    print(len(TOI_ID_list), len(flare_number), len(peak_time), len(amplitude), len(time_scale), len(total_flare_energies), len(Teff), len(radius), len(TOI_period))
+    print(list_index)
+g = open('/data/whitsett.n/Tier_3/All_TOI/All_statistic_TOI.txt', 'w')
 g.write('Total Flares: ' + str(total_flares) + '\n' + 'Net Observation Time (Days): ' + str(total_observation_time/(60*24)))
 g.close()
