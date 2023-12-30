@@ -30,4 +30,6 @@ for index in range(target):
                 Observations.download_products(data_products[data], download_dir = "/data/whitsett.n/TESS_Light_Curves/All_TOI/" + TOI_Name)
     except:
         print('No associated products')
+        print('No associated products')
         continue
+

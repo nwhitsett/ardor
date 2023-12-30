@@ -15,6 +15,7 @@ import statistics as st
 import os
 import warnings
 import planck_law as pl
+import planck_law as pl
 import aflare
 warnings.filterwarnings("ignore")
 def exp_decay(x, a, b, c):
@@ -72,7 +73,9 @@ def TESS_FITS_csv(input_file, csv_directory, csv_name=None):
     sap_flux = hdul[1].data['SAP_FLUX']
     pdcsap_flux = hdul[1].data['PDCSAP_FLUX']
 
+
     
+    grand_list = pd.DataFrame({'time': time, 'sap_flux': sap_flux, 'pdcsap_flux': pdcsap_flux})
     grand_list = pd.DataFrame({'time': time, 'sap_flux': sap_flux, 'pdcsap_flux': pdcsap_flux})
     return grand_list.to_csv(directory)
 
