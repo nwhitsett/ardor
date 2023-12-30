@@ -485,8 +485,7 @@ item_count = 0
 total_periastron_list = []
 total_periastron_epoch_list = []
 total_epoch_list = []
-
-for M_dwarves in TESS_Folder_ID[0][333:]:
+for M_dwarves in TESS_Folder_ID[0][:333]:
     ##Iteration Scheme
     TOI_ID = M_dwarves
     a = os.listdir('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/Periastron_Hosts/' + M_dwarves)
