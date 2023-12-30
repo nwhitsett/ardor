@@ -64,17 +64,19 @@ def allesfitter_priors(flare_csv, time_unit='min'):
     time = flare[0]
     flux = flare[1] - 1.0
     print(flare)
+    time_factor = 1140
     try:
-        if np.abs(time[0]) > 1:
+        if time_unit == 'min':
             params, pcov = curve_fit(exp_decay, time[(30-count):], flux[(30-count):], maxfev=5000)
-            time_unit = 1140
-        elif np.abs(time[0]) < 1:
+            time_factor = 1140
+        elif time_unit == 'days':
             params, pcov = curve_fit(exp_decay, time[(30-count):]*1140, flux[(30-count):], maxfev=5000)
-            time_unit = 1
+            time_factor = 1
     except:
         params = (0, 5.0, 0.01)
+        time_factor = 1140
     x = np.linspace(0, 10, num = 1500)/(1140)
-    y = exp_decay(x, params[0], params[1]*time_unit, params[2])
+    y = exp_decay(x, params[0], params[1]*int(time_factor), params[2])
     amp, idx = find_nearest(y, y.max()/2)
     amp = flux.max()
     tau = x[idx]
@@ -82,7 +84,7 @@ def allesfitter_priors(flare_csv, time_unit='min'):
         if math.isnan(flare[2][index]) == True:
             flare[2][index] = 1e-3
     if np.abs(flare[0][0]) > 1:
-        flare[0] = flare[0]/time_unit
+        flare[0] = flare[0]/time_factor
     flare.to_csv(flare_csv, index=False, header=False)
     return amp, tau
 
@@ -141,3 +143,34 @@ def flare_energy(fwhm, ampl, Teff, R_stellar):
     color_factor = planck_law.planck_integrator(600e-6, 1000e-6, Teff)/planck_law.planck_integrator(600e-6, 1000e-6, 9000)
     energy = (5.67e-8)*(9000**4)*(flare_area)*np.pi*(R_stellar*6.957e8*R_stellar*6.957e8)*color_factor*(1e7)*86400
     return energy
+
+def csv_cleaner(flare_csv_dir):
+    data = pd.read_csv(flare_csv_dir, header=None, index_col=False)
+    time = np.array(data[0])
+    flux = np.array(data[1])
+    error = np.array(data[2])
+    gap_index = 0
+    error_index = []
+    for index in range(len(time) - 1):
+        dt = time[index + 1] - time[index]
+        if dt > 10:
+            gap_index = index + 1
+    
+    for index in range(len(time)):
+        if np.isnan(error[index]) == True:
+            error[index] = 1e-3
+            error_index.append(index)
+    for index in error_index:
+        error[index] = np.average(error)
+        if np.isnan(np.average(error)) == True:
+            error[index] = 1e-3
+    if gap_index != 0 and gap_index < len(time)/2:
+        time = time[gap_index:]
+        flux = flux[gap_index:]
+        error = error[gap_index:]
+    elif gap_index != 0 and gap_index >= len(time)/2:
+        time = time[:gap_index]
+        flux = flux[:gap_index]
+        error = error[:gap_index]
+    output = np.stack((time,flux,error)).T
+    np.savetxt(flare_csv_dir, output, delimiter=',')
