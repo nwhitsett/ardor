@@ -308,7 +308,7 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
     SMA = data - np.array(mov_average)
     count = 0
     ls = LS(time, SMA)
-    freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=1000, method='fast')
+    freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=100, method='fast')
     cutoff = ls.false_alarm_probability(power.max())
     while cutoff < 0.99 and count <= LS_Iterations:
         best_frequency = freq[np.argmax(power)]
@@ -319,7 +319,7 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
         SMA = SMA -( offset +design_matrix.dot(theta))
         cutoff = ls.false_alarm_probability(power.max())
         ls = LS(time, SMA)
-        freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=75, method='fast')
+        freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=100, method='fast')
         count += 1
         mov_average = mov_average -( offset +design_matrix.dot(theta))
     return SMA
