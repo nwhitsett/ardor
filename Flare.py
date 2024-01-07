@@ -18,6 +18,7 @@ import planck_law as pl
 import planck_law as pl
 import aflare
 import time as timer
+import copy
 warnings.filterwarnings("ignore")
 def exp_decay(x, a, b, c):
     '''
@@ -160,6 +161,17 @@ def flare_ID(data, sigma, cadence):
         data. The index begins at the triggering data point.
 
     '''
+    tmp_data = copy.deepcopy(data)
+    start_index = 0
+    end_index = 100
+    for index in range(len(tmp_data)):
+        std = 3*np.std(tmp_data[start_index:end_index]) + np.median(tmp_data[start_index:end_index])
+        tmp_data[start_index:end_index][tmp_data[start_index:end_index] > std] = np.median(tmp_data[start_index:end_index])
+        start_index += 1
+        end_index += 1
+        if index > len(tmp_data) - 101:
+            start_index = len(tmp_data) - 101
+            end_index = len(tmp_data) - 1
     count = 0
     flare_indices = []
     flare_length = 0
@@ -167,52 +179,34 @@ def flare_ID(data, sigma, cadence):
     flare = False
     begin = 0
     end = 250
-    begin1 = 0
-    end1 = 1500
-    shift1 = 0
+    shift = 0
     peak_index = 0
     for flux in data:
         if end >= len(data):
-            sig = sigma*np.std(data[begin:len(data)-1])
-            mu = np.mean(data[begin:len(data)-1])
+            sig = sigma*np.std(tmp_data[begin:len(data)-1])
+            mu = np.mean(tmp_data[begin:len(data)-1])
         else:
-            sig = sigma*np.std(data[begin:end])
-            mu = np.mean(data[begin:end])
+            sig = sigma*np.std(tmp_data[begin:end])
+            mu = np.mean(tmp_data[begin:end])
         if flux > (mu + sig) and flare == False:
             flare = True
             flare_length += 1
             peak_index = count
         try:
-            if cadence == 'min':
-                if flare == True and data[count+1] > (mu + sig/3):
-                    flare_length += 1
-                if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
-                    flare = False
-                    flare_indices.append(peak_index)
-                    flare_length_list.append(flare_length)
-                    flare_length = 0
-                    peak_index = 0
-                count += 1
-                shift += 1
-                if shift == 10:
-                    begin += 10
-                    end += 10
-                    shift = 0
-            elif cadence == 'sec':
-                if flare == True and data[count+1] > (mu + sig/3):
-                    flare_length += 1
-                if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 12:
-                    flare = False
-                    flare_indices.append(peak_index)
-                    flare_length_list.append(flare_length)
-                    flare_length = 0
-                    peak_index = 0
-                count += 1
-                shift1 += 1
-                if shift1 == 10:
-                    begin1 += 10
-                    end1 += 10
-                    shift1 = 0
+            if flare == True and data[count+1] > (mu + sig/3):
+                flare_length += 1
+            if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
+                flare = False
+                flare_indices.append(peak_index)
+                flare_length_list.append(flare_length)
+                flare_length = 0
+                peak_index = 0
+            count += 1
+            shift += 1
+            if shift == 10:
+                begin += 10
+                end += 10
+                shift = 0
         except:
             continue
     return flare_indices, flare_length_list
@@ -286,15 +280,28 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
         Returns the detrended data array.
 
     '''
+    tmp_data = copy.deepcopy(data)
+    start_index = 0
+    end_index = 100
+    for index in range(len(tmp_data)):
+        sigma = 3*np.std(tmp_data[start_index:end_index]) + np.median(tmp_data[start_index:end_index])
+        tmp_data[start_index:end_index][tmp_data[start_index:end_index] > sigma] = np.median(tmp_data[start_index:end_index])
+        start_index += 1
+        end_index += 1
+        if index > len(tmp_data) - 101:
+            start_index = len(tmp_data) - 101
+            end_index = len(tmp_data) - 1
+
+    
     mov_average = []
     j = 0
     i = 0
     for a in range(time_scale - 1):
-        window = data[a : 1 + a + j]
+        window = tmp_data[a : 1 + a + j]
         mov_average.append(sum(window)/(j+1))
         j += 1
     while i < len(data) - time_scale + 1:
-        window = data[i : i + time_scale]
+        window = tmp_data[i : i + time_scale]
         window_average = round(sum(window) / time_scale, 2)
         mov_average.append(window_average)
         i += 1
@@ -312,9 +319,10 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
         SMA = SMA -( offset +design_matrix.dot(theta))
         cutoff = ls.false_alarm_probability(power.max())
         ls = LS(time, SMA)
-        freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=1000, method='fast')
+        freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=75, method='fast')
         count += 1
-    return SMA
+        mov_average = mov_average -( offset +design_matrix.dot(theta))
+    return SMA, mov_average
         
 def flare_phase_folded_ID(phase, flare_array, period, epoch):
     new_ID_list = []
@@ -450,14 +458,12 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
                 popt, pcov = curve_fit(exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
                 squares = (alles_data[events:events+30] - exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
                 chi2_cutoff = 18
-                plt.clf()
             elif lengths[index] >= 15 and lengths[index] < 25:
                 alles_data = new_data/np.median(new_data)
                 error = new_error/np.median(new_data)
                 popt, pcov = curve_fit(exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
                 squares = (alles_data[events:events+20] - exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
                 chi2_cutoff = 9.5
-                plt.clf()
             elif lengths[index] > 5 and lengths[index] < 15:
                 alles_data = new_data/np.median(new_data)
                 error = new_error/np.median(new_data)
@@ -470,7 +476,6 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
                 popt, pcov = curve_fit(exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
                 squares = (alles_data[events:events+7] - exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
                 chi2_cutoff = 1.2
-                plt.clf()
             chi_squared = np.sum(squares)
             if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
                 flare_time_scale.append(popt[1])
@@ -494,6 +499,35 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
                 total_flares += 1
         index += 1
     return host_ID_list, accepted_flare_number, peak_time, flare_amplitude, flare_time_scale, flare_energy, Teff, radius, flare_phase, flare_count
+
+def tier0(TESS_fits_file):
+    '''
+    
+
+    Parameters
+    ----------
+    TESS_fits_file : string
+        The TESS light curve you wish to detrend and clean up.
+    Returns
+    -------
+    time : numpy array
+        The time axis, given in BJD - 2457000
+    detrend_flux : TYPE
+        Median centered pdcsap flux, given in electrons/second
+
+    '''
+    b, pdcsap_flux, pdcsap_error = TESS_data_extract(TESS_fits_file, PDCSAP_ERR=True)
+    time, flux, pdcsap_error = delete_nans(b, pdcsap_flux)
+    detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
+    return time, detrend_flux, pdcsap_error
+
+
+
+
+
+
+
+
 
 TESS_Folder_ID = os.listdir('/data/whitsett.n/TESS_Light_Curves/All_TOI/')
 TOI_Catalog = pd.read_csv('/data/whitsett.n/Reference_Files/All_TOI_12_17_23.csv')
