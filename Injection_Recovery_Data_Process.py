@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import csv
 
-data = pd.read_csv('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Injection_Test (Late Type M).csv')
+data = pd.read_csv('/data/whitsett.n/Pipeline_Validation/Injection_Recovery_All_Exoplanet_T2.csv')
 amp = list(data['Amplitude'])
 FWHM = list(data['FWHM'])
 error = list(data['Error'])
@@ -46,6 +46,6 @@ for i in range(len(FWHM_bins)):
             tmp.append(pos/count * 100)
     y.append(tmp)
 
-with open('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Injection_Test_Grid (Late M Dwarf).csv', 'w', newline='') as f:
+with open('/data/whitsett.n/Pipeline_Validation/Injection_Test_Grid_All_Exoplanet_T2.csv', 'w', newline='') as f:
     writer = csv.writer(f)
     writer.writerows(y)

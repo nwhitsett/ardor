@@ -17,6 +17,7 @@ import warnings
 import planck_law as pl
 import planck_law as pl
 import aflare
+import time as timer
 warnings.filterwarnings("ignore")
 def exp_decay(x, a, b, c):
     '''
@@ -139,7 +140,7 @@ def phase_folder(time, period, epoch):
     phase = phase - period/2
     return phase
 
-def flare_ID(data, sigma):
+def flare_ID(data, sigma, cadence):
     '''
     
 
@@ -166,7 +167,9 @@ def flare_ID(data, sigma):
     flare = False
     begin = 0
     end = 250
-    shift = 0
+    begin1 = 0
+    end1 = 1500
+    shift1 = 0
     peak_index = 0
     for flux in data:
         if end >= len(data):
@@ -180,25 +183,41 @@ def flare_ID(data, sigma):
             flare_length += 1
             peak_index = count
         try:
-            if flare == True and data[count+1] > (mu + sig/3):
-                flare_length += 1
-            if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
-                flare = False
-                flare_indices.append(peak_index)
-                flare_length_list.append(flare_length)
-                flare_length = 0
-                peak_index = 0
-            count += 1
-            shift += 1
-            if shift == 10:
-                begin += 10
-                end += 10
-                shift = 0
+            if cadence == 'min':
+                if flare == True and data[count+1] > (mu + sig/3):
+                    flare_length += 1
+                if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
+                    flare = False
+                    flare_indices.append(peak_index)
+                    flare_length_list.append(flare_length)
+                    flare_length = 0
+                    peak_index = 0
+                count += 1
+                shift += 1
+                if shift == 10:
+                    begin += 10
+                    end += 10
+                    shift = 0
+            elif cadence == 'sec':
+                if flare == True and data[count+1] > (mu + sig/3):
+                    flare_length += 1
+                if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 12:
+                    flare = False
+                    flare_indices.append(peak_index)
+                    flare_length_list.append(flare_length)
+                    flare_length = 0
+                    peak_index = 0
+                count += 1
+                shift1 += 1
+                if shift1 == 10:
+                    begin1 += 10
+                    end1 += 10
+                    shift1 = 0
         except:
             continue
     return flare_indices, flare_length_list
 
-def delete_nans(time, data):
+def delete_nans(time, data, error):
     '''
     
     Parameters
@@ -224,9 +243,11 @@ def delete_nans(time, data):
     '''
     time = time.tolist()
     data = data.tolist()
+    error = error.tolist()
     nan_set = set()
     count_data = 0
     count_time = 0
+    count_error = 0
     for indices in data:
         if np.isnan(indices) == True:
             nan_set.add(count_data)
@@ -235,11 +256,17 @@ def delete_nans(time, data):
         if np.isnan(indices) == True:
             nan_set.add(count_time)
         count_time += 1
+    for indices in error:
+        if np.isnan(indices) == True:
+            nan_set.add(count_error)
+        count_time += 1
     time1 = [i for j, i in enumerate(time) if j not in nan_set]
     data1 = [i for j, i in enumerate(data) if j not in nan_set]
+    error1 = [i for j, i in enumerate(error) if j not in nan_set]
     time1 = np.array(time1)
     data1 = np.array(data1)
-    return time1, data1
+    error1 = np.array(error1)
+    return time1, data1, error1
 
 def SMA_detrend(time, data, time_scale, LS_Iterations=3):
     '''
@@ -379,14 +406,15 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
     
     file = data_directory
     b, pdcsap_flux, pdcsap_error = TESS_data_extract(file, PDCSAP_ERR=True)
-    time, flux = delete_nans(b, pdcsap_flux)
+    time, flux, pdcsap_error = delete_nans(b, pdcsap_flux, pdcsap_error)
     detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
-    plt.clf()
-    flares, lengths = flare_ID(detrend_flux, 3)
     if file.endswith('a_fast-lc.fits') == True:
         observation_time += len(time)*(0.33333333)
+        cadence = 'sec'
     elif file.endswith('a_fast-lc.fits') == False:  
         observation_time += len(time)*2
+        cadence = 'min'
+    flares, lengths = flare_ID(detrend_flux, 3, cadence)
     phase = phase_folder(time, period, epoch)
     index = 0
     possible_flares += len(flares)
@@ -488,13 +516,17 @@ total_periastron_list = []
 total_periastron_epoch_list = []
 total_epoch_list = []
 list_index = 0
-for M_dwarves in TESS_Folder_ID[1270:]:
+
+tier0_tau = []
+tier1_tau = []
+tier2_tau = []
+for M_dwarves in TESS_Folder_ID:
     ##Iteration Scheme
     TOI_ID = M_dwarves
     print(TOI_ID)
 
     a = os.listdir('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves)
-    os.mkdir('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/')
+    # os.mkdir('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/')
     print(item_count, M_dwarves)
     ##Relevant parameters from TOI catalog
     period = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == float(M_dwarves), 'pl_orbper'])[0]
@@ -546,19 +578,22 @@ for M_dwarves in TESS_Folder_ID[1270:]:
     # total_periastron_epoch_list = []
     total_epoch_list = []
     for folders in a:
+        t1 = timer.time()
         try:
             b, pdcsap_flux, pdcsap_error = TESS_data_extract('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
         except:
             continue
-        time, flux = delete_nans(b, pdcsap_flux)
-        detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
-        flares, lengths = flare_ID(detrend_flux, 3)
         if folders.endswith('a_fast-lc.fits') == True:
             observation_time += len(time)*(0.33333333)
             total_observation_time += len(time)*(0.33333333)
         elif folders.endswith('a_fast-lc.fits') == False:  
             observation_time += len(time)*2
             total_observation_time += len(time)*2
+        time, flux = delete_nans(b, pdcsap_flux)
+        detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
+        t2 = timer.time()
+        tier0_tau.append(t2-t1)
+        flares, lengths = flare_ID(detrend_flux, 3)
         index = 0
         possible_flares += len(flares)
         total_possible_flares += len(flares)
@@ -589,6 +624,8 @@ for M_dwarves in TESS_Folder_ID[1270:]:
             criteria1 = False
             if recenter > np.mean(new_data)+3*(np.std(new_data)):
                 criteria1 = True
+            t3 = timer.time()
+            tier1_tau.append(t3-t2)
             if criteria1 == True and new_data[events+1] > np.mean(new_data)+2*(np.std(new_data)) and len(c) > 0:
                 new_time = (new_time - new_time[events])*24*60
                 if lengths[index] >= 25:
@@ -634,10 +671,10 @@ for M_dwarves in TESS_Folder_ID[1270:]:
                     total_flare_energies.append(energy)
                     Teff.append(T)
                     radius.append(stellar_radius)
-                    try:
-                        X = np.column_stack((new_time[events-30:events+40], alles_data[events-30:events+40], error[events-30:events+40]))
-                    except:
-                        X = np.column_stack(([0],[0],[0]))
+                    # try:
+                    #     X = np.column_stack((new_time[events-len(new_time):events+len(new_time)], alles_data[events-len(new_time):events+len(new_time)], error[events-len(new_time):events+len(new_time)]))
+                    # except:
+                    #     X = np.column_stack(([0],[0],[0]))
                     baseline = st.median(new_data)*(lengths[index])*2
                     median = st.median(new_data)
                     flare_phase.append(flare_phase_value)
@@ -654,30 +691,39 @@ for M_dwarves in TESS_Folder_ID[1270:]:
                     print(flare_count)
                     if lengths[index] > 5:
                         print('Flare ' + str(flare_count) + ' length: ' + str(lengths[index]))
-                    np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Flare' + str(flare_count) + '.csv', X, delimiter=',')
+                    # np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Flare' + str(flare_count) + '.csv', X, delimiter=',')
                     flare_count += 1
                     total_flares += 1
+                    t4 = timer.time()
+                    tier2_tau.append(t4-t3)
                     
                         
             index += 1
+        ZZ = np.column_stack((np.array(np.array(tier0_tau).mean()), np.array(np.array(tier1_tau).mean()/len(flares)), np.array(np.array(tier2_tau).mean())))
+        with open("/data/whitsett.n/Tier_3/Time_Stats.csv", "a") as f:
+            np.savetxt(f, ZZ, delimiter=",", fmt='%s')
+            f.close()
+        tier0_tau = []
+        tier1_tau = []
+        tier2_tau = []
     if observation_time == 0:
         observation_time = -1
     if possible_flares == 0 :
         possible_flares = -1
-    Y = np.column_stack((flare_amplitude, flare_time_scale, flare_energy))
-    np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/All_Flares.csv', Y, delimiter=',')
-    f = open('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Host_Statistics.txt', 'w')
-    f.write('Flares/Day: ' + str(flare_count*60*24/observation_time) + '\n' + 'Possible Flares: ' + str(possible_flares) + '\n' +
-            'Accepted Flares: ' + str(flare_count) + '\n' + 'Accepted/Possible Flares: ' + str(flare_count/possible_flares) + '\n' +
-            'Observation Time (min): ' + str(observation_time))
-    f.close()
+    # Y = np.column_stack((flare_amplitude, flare_time_scale, flare_energy))
+    # np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/All_Flares.csv', Y, delimiter=',')
+    # f = open('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Host_Statistics.txt', 'w')
+    # f.write('Flares/Day: ' + str(flare_count*60*24/observation_time) + '\n' + 'Possible Flares: ' + str(possible_flares) + '\n' +
+    #         'Accepted Flares: ' + str(flare_count) + '\n' + 'Accepted/Possible Flares: ' + str(flare_count/possible_flares) + '\n' +
+    #         'Observation Time (min): ' + str(observation_time))
+    # f.close()
     item_count += 1
-    ZZ = np.column_stack((TOI_ID_list, flare_number, peak_time, amplitude, time_scale, total_flare_energies, Teff, radius, TOI_period))
-    with open("/data/whitsett.n/Tier_3/All_TOI/All_TOI_Flares2.csv", "a") as f:
-        np.savetxt(f, ZZ, delimiter=",", fmt='%s')
-        f.close()
-    print(len(TOI_ID_list), len(flare_number), len(peak_time), len(amplitude), len(time_scale), len(total_flare_energies), len(Teff), len(radius), len(TOI_period))
-    print(list_index)
-g = open('/data/whitsett.n/Tier_3/All_TOI/All_statistic_TOI.txt', 'w')
-g.write('Total Flares: ' + str(total_flares) + '\n' + 'Net Observation Time (Days): ' + str(total_observation_time/(60*24)))
-g.close()
+    # ZZ = np.column_stack((TOI_ID_list, flare_number, peak_time, amplitude, time_scale, total_flare_energies, Teff, radius, TOI_period))
+    # with open("/data/whitsett.n/Tier_3/All_TOI/All_TOI_Flares2.csv", "a") as f:
+    #     np.savetxt(f, ZZ, delimiter=",", fmt='%s')
+    #     f.close()
+    # print(len(TOI_ID_list), len(flare_number), len(peak_time), len(amplitude), len(time_scale), len(total_flare_energies), len(Teff), len(radius), len(TOI_period))
+    # print(list_index)
+# g = open('/data/whitsett.n/Tier_3/All_TOI/All_statistic_TOI.txt', 'w')
+# g.write('Total Flares: ' + str(total_flares) + '\n' + 'Net Observation Time (Days): ' + str(total_observation_time/(60*24)))
+# g.close()

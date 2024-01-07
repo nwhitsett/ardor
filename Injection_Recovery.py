@@ -29,46 +29,42 @@ def FWHM_uniform():
 # for T in range(2500, 6000):
 #     flare_baseline[T] = pl.planck_integrator(600e-9, 1000e-9, T)/pl.planck_integrator(600e-9, 1000e-9, 9000)
 
-TESS_Folder_ID = [x[1] for x in os.walk('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/')]
-TOI_Catalog = pd.read_csv('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/csv-file-toi-catalog.csv')
+TESS_Folder_ID = [x[1] for x in os.walk('/data/whitsett.n/TESS_Light_Curves/All_TOI')]
+TOI_Catalog = pd.read_csv('/data/whitsett.n/Reference_Files/All_TOI_12_17_23.csv')
 
 
 TOI_ID_list = []
-test_flare_list = []
+test_flare_list_T1 = []
+test_flare_list_T2 = []
 lc_num = 0
 item_count = 0
 random_sample = []
 check = 0
-for M_dwarves in TESS_Folder_ID[0]:
-    TOI_ID = float(M_dwarves[3::])
-    T = np.array(TOI_Catalog.loc[TOI_Catalog['Full TOI ID'] == TOI_ID, 'Effective Temperature Value'])[0]
-    if T < 3000:
-        random_sample.append(M_dwarves)
-        print(M_dwarves)
     
 
-# for M_dwarves in range(200):
-    
-#     sample = np.random.randint(0, len(TESS_Folder_ID[0]))
-#     while TESS_Folder_ID[0][sample] in random_sample:
-#         sample = np.random.randint(0, len(TESS_Folder_ID[0]))
-#     random_sample.append(TESS_Folder_ID[0][sample])
+for stars in range(200):
+    sample = np.random.randint(0, len(TESS_Folder_ID[0]))
+    while TESS_Folder_ID[0][sample] in random_sample:
+        sample = np.random.randint(0, len(TESS_Folder_ID[0]))
+    random_sample.append(TESS_Folder_ID[0][sample])
     
 for M_dwarves in random_sample:
-    if M_dwarves.endswith('.01') == True:
-        ##Iteration Scheme
-        TOI_ID = float(M_dwarves[3::])
-        a = os.listdir('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/' + M_dwarves)
-        print(item_count, M_dwarves)
-        
-        ##Relevant parameters from TOI catalog
-        flare_count = 1
-        
-        ##Trackable values per star
-        for folders in a:
+    ##Iteration Scheme
+    a = os.listdir('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves)
+    print(item_count, M_dwarves)
+    
+    ##Relevant parameters from TOI catalog
+    flare_count = 1
+    file = 0
+    ##Trackable values per star
+    for folders in a:
+        if file == 0:
             inject_location_index = []
-            flare_inject_dict = dict()
-            b, pdcsap_flux, pdcsap_error = Flare.TESS_data_extract('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/M Dwarf Hosts/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
+
+            flare_inject_dict_T1 = dict()
+            flare_inject_dict_T2 = dict()
+
+            b, pdcsap_flux, pdcsap_error = Flare.TESS_data_extract('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
             time, flux = Flare.delete_nans(b, pdcsap_flux)
             for flares in range(15):
                 location = np.random.randint(50, len(flux)-50)
@@ -81,12 +77,12 @@ for M_dwarves in random_sample:
                 normalized_sample_inject = normalized_sample + flare_inject
                 flux[location-50:location+50] = np.median(sample_baseline)*normalized_sample_inject
                 baseline_error = np.std(normalized_sample)
-                flare_inject_dict[location] = [amp, FWHM, baseline_error, False]
-    
+                flare_inject_dict_T1[location] = [amp, FWHM, baseline_error, False]
+                flare_inject_dict_T2[location] = [amp, FWHM, baseline_error, False]
+
             detrend_flux = Flare.SMA_detrend(time, flux, 80, LS_Iterations=5)
             flares, lengths = Flare.flare_ID(detrend_flux, 3)
             index = 0
-    
             for flare_events in flares:
                 if flare_events >= 100 and len(flux) - flare_events > 100:
                     new_time = time[flare_events-100:flare_events+100]
@@ -104,6 +100,8 @@ for M_dwarves in random_sample:
                 norm_time = time[flare_events]
                 events = np.where(new_data == recenter)[0][0]
                 peak_centered_event = flare_events + (events-100)
+                if peak_centered_event in inject_location_index:
+                    flare_inject_dict_T1[peak_centered_event][3] = True
                 criteria1 = False
                 if recenter > np.mean(new_data)+3*(np.std(new_data)):
                     criteria1 = True
@@ -148,29 +146,51 @@ for M_dwarves in random_sample:
                     chi_squared = np.sum(squares)
                     if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
                         if peak_centered_event in inject_location_index:
-                            flare_inject_dict[peak_centered_event][3] = True
+                            flare_inject_dict_T2[peak_centered_event][3] = True
                             
                         index += 1
-            
-            test_flare_list.append(flare_inject_dict)
+
+            test_flare_list_T1.append(flare_inject_dict_T1)
+            test_flare_list_T2.append(flare_inject_dict_T2)
             lc_num += 1
             print('LC #: ' + str(lc_num))
-            
+            file += 1
+        else:
+            continue
+        
+amp_list_T1=[]
+FWHM_list_T1 = []
+result_T1 = []
+error_T1 = []
 
-amp_list=[]
-FWHM_list = []
-result = []
-error = []
-for d in test_flare_list:
+amp_list_T2=[]
+FWHM_list_T2 = []
+result_T2 = []
+error_T2 = []
+for d in test_flare_list_T1:
     for key,value in d.items():
         # notice the difference here, instead of appending a nested list
         # we just append the key and value
         # this will make temp_list something like: [a0, 0, a1, 1, etc...]
-        amp_list.append(value[0])
-        FWHM_list.append(value[1])
-        error.append(value[2])
-        result.append(value[3])
+        amp_list_T1.append(value[0])
+        FWHM_list_T1.append(value[1])
+        error_T1.append(value[2])
+        result_T1.append(value[3])
+
+for d in test_flare_list_T2:
+    for key,value in d.items():
+        # notice the difference here, instead of appending a nested list
+        # we just append the key and value
+        # this will make temp_list something like: [a0, 0, a1, 1, etc...]
+        amp_list_T2.append(value[0])
+        FWHM_list_T2.append(value[1])
+        error_T2.append(value[2])
+        result_T2.append(value[3])
         
-Z = np.stack((amp_list, FWHM_list, error, result))
+ZZ = np.stack((amp_list_T1, FWHM_list_T1, error_T1, result_T1))
+ZZ = np.transpose(ZZ)
+np.savetxt('/data/whitsett.n/Pipeline_Validation/Injection_Recovery_All_TOI_T1.csv', ZZ, delimiter=',')
+
+Z = np.stack((amp_list_T2, FWHM_list_T2, error_T2, result_T2))
 Z = np.transpose(Z)
-np.savetxt('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Injection_Test (Late Type M).csv', Z, delimiter=',')
+np.savetxt('/data/whitsett.n/Pipeline_Validation/Injection_Recovery_All_TOI_T2.csv', Z, delimiter=',')
