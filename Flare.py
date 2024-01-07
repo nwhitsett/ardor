@@ -19,6 +19,9 @@ import planck_law as pl
 import aflare
 import time as timer
 import copy
+import allesfitter_priors
+import shutil
+import allesfitter
 warnings.filterwarnings("ignore")
 def exp_decay(x, a, b, c):
     '''
@@ -262,7 +265,7 @@ def delete_nans(time, data, error):
     error1 = np.array(error1)
     return time1, data1, error1
 
-def SMA_detrend(time, data, time_scale, LS_Iterations=3):
+def SMA_detrend(time, data, time_scale, LS_Iterations=25):
     '''
     
     This applies a windowed, Single Moving Average to detrend potentially
@@ -278,7 +281,6 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
     -------
     numpy array
         Returns the detrended data array.
-
     '''
     tmp_data = copy.deepcopy(data)
     start_index = 0
@@ -308,7 +310,7 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
     SMA = data - np.array(mov_average)
     count = 0
     ls = LS(time, SMA)
-    freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=100, method='fast')
+    freq, power = ls.autopower(minimum_frequency=0, maximum_frequency=1000, method='auto')
     cutoff = ls.false_alarm_probability(power.max())
     while cutoff < 0.99 and count <= LS_Iterations:
         best_frequency = freq[np.argmax(power)]
@@ -319,7 +321,7 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
         SMA = SMA -( offset +design_matrix.dot(theta))
         cutoff = ls.false_alarm_probability(power.max())
         ls = LS(time, SMA)
-        freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=100, method='fast')
+        freq, power = ls.autopower(minimum_frequency=0, maximum_frequency=1000, method='auto')
         count += 1
         mov_average = mov_average -( offset +design_matrix.dot(theta))
     return SMA
@@ -680,15 +682,79 @@ def tier2(time, flux, pdcsap_error, flares, lengths, output_dir, host_name = 'My
                     flare_count += 1
                     total_flares += 1
                     ZZ = np.column_stack((TOI_ID_list, flare_number, peak_time, amplitude, time_scale, Teff, radius, flare_energy))
-                    with open(output_dir + '/' + str(host_name) + '/_All_Flare_Parameters.csv', "a") as f:
+                    with open(output_dir + '/' + str(host_name) + '/All_Flare_Parameters.csv', "a") as f:
                         np.savetxt(f, ZZ, delimiter=",", fmt='%s')
                         f.close()
                     index += 1
- 
+                    
+def tier3(tier_2_output_dir, tier_3_working_dir, tier_3_output_dir, settings_template_dir, params_template_dir, host_name = 'My_Host', T = 4000, host_radius = 1, MCMC_CPUS = 1):
+    #Check each folder
+    flare_files = os.listdir(tier_2_output_dir)
+    for csvs in flare_files:
+        parameter_list_list = [[], [], [], [], [], [], [], [], [], [], [], [], [], [], []]
+        # try:
+        #Make output directory to store plots and flare data for each target
+        #Omit the statistics files
+        if csvs == 'All_Flare_Parameters.csv' or csvs == 'Host_Statistics.txt' or csvs == 'Flare_Phase.csv':
+            continue
+        # Copy relevant file to allesfitter folder
+        shutil.copyfile(tier_2_output_dir + '/' + csvs, tier_3_working_dir+ '/' +  csvs)
+        allesfitter_priors.csv_cleaner(tier_3_working_dir + '/' + csvs)
+        # Run allesfitter
+        allesfitter_priors.flare_params(tier_3_working_dir + '/' +  csvs, params_template_dir, tier_3_working_dir + '/params.csv')
+        allesfitter_priors.flare_settings(tier_3_working_dir + '/' +  csvs, settings_template_dir, tier_3_working_dir + '/settings.csv', multi_process=True, cores=MCMC_CPUS)
+        allesfitter.mcmc_fit(tier_3_working_dir)
+        allesfitter.mcmc_output(tier_3_working_dir)
+
+        #Extract relevant parameters and append them to relevant lists
+        # Full Data csv
+        parameter_list = allesfitter_priors.return_parameters(tier_3_working_dir + '/results/mcmc_table.csv')
+        if len(parameter_list) == 0:
+            continue
+        energy = allesfitter_priors.flare_energy(parameter_list[3], parameter_list[6], T,  host_radius)
+        parameter_list_list[0].append(host_name)
+        parameter_list_list[1].append(csvs[:-4])
+        for index in range(9):
+            parameter_list_list[index+2].append(parameter_list[index])
+        parameter_list_list[11].append(energy)
+        parameter_list_list[12].append(T)
+        parameter_list_list[13].append(host_radius)
+
+
+        #Per target csv
+        #Remove current csv
+        os.remove(tier_3_working_dir + '/' +  csvs)
+        #Copy relevant graphs and log files
+        shutil.copyfile(tier_3_working_dir + '/results/mcmc_corner.pdf', tier_3_output_dir + '/mcmc_corner_' + csvs[:-4] + '.pdf')
+        shutil.copyfile(tier_3_working_dir + '/results/mcmc_fit_b.pdf', tier_3_output_dir + '/mcmc_fit_' + csvs[:-4] + '.pdf')
+        result_dir = os.listdir(tier_3_working_dir + '/results')
+        for dirs in result_dir:
+            if dirs[-3] == 'l':
+                shutil.copyfile(tier_3_working_dir + '/results/' + dirs, tier_3_output_dir + '/mcmc_' + csvs[:-4] + '.log')
+        #Delete results folder
+        for files in os.listdir(tier_3_working_dir + '/results'):
+            os.remove(tier_3_working_dir + '/results/' + files)
+        # except:
+        #     print(1)
+        #     parameter_list_list[0].append(host_name)
+        #     parameter_list_list[1].append(csvs[:-4])
+        #     for index in range(9):
+        #         parameter_list_list[index+2].append(np.nan)
+        #     parameter_list_list[11].append(np.nan)
+        #     parameter_list_list[12].append(T)
+        #     parameter_list_list[13].append(host_radius)
+        ZZ = np.column_stack((parameter_list_list[0], parameter_list_list[1], parameter_list_list[2], parameter_list_list[3], parameter_list_list[4], parameter_list_list[5], parameter_list_list[6], parameter_list_list[7], parameter_list_list[8], parameter_list_list[9], parameter_list_list[10], parameter_list_list[11], parameter_list_list[12], parameter_list_list[13]))
+        with open(tier_3_output_dir + '/All_TOI_MCMC_Flares.csv', "a") as f:
+            np.savetxt(f, ZZ, delimiter=",", fmt='%s')
+            f.close()
+            
+            
+
 time, flux, detrend, error = tier0('/data/whitsett.n/TESS_Light_Curves/All_Exoplanets/2MASS J01033563-5515561 A/tess2020238165205-s0029-0000000206502540-0193-s_lc.fits')
 
 d, e = tier1(detrend, 3)
-tier2(time, flux, error, d, e, '/data/whitsett.n/output', host_name = 'Test')
+tier2(time, flux, error, d, e, '/data/whitsett.n/', host_name = 'Test')
+tier3('/data/whitsett.n/Test', '/data/whitsett.n/Test_working_Dir', '/data/whitsett.n/Test_output', '/data/whitsett.n/allesfitter/templates/N_Flares/settings.csv', '/data/whitsett.n/allesfitter/templates/N_Flares/params.csv', host_name = 'Test', T = 3000, host_radius = 1.2, MCMC_CPUS=63)
 
 
 
