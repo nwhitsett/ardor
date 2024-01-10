@@ -55,26 +55,20 @@ def exp_decay(x, a, b, c):
     return a * np.exp(-b * x) + c
 def allesfitter_priors(flare_csv, time_unit='min'):
     flare = pd.read_csv(flare_csv, header=None)
-    count = 0
-    for vals in flare[0]:
-        if np.log10(np.abs(vals)) > 2:
-            count += 1
-    flare.drop(index=flare.index[:count], axis=0, inplace=True)
     flare.reset_index(inplace=True, drop=True)
     time = flare[0]
     flux = flare[1] - 1.0
-    print(flare)
     time_factor = 1140
-    try:
-        if time_unit == 'min':
-            params, pcov = curve_fit(exp_decay, time[(30-count):], flux[(30-count):], maxfev=5000)
-            time_factor = 1140
-        elif time_unit == 'days':
-            params, pcov = curve_fit(exp_decay, time[(30-count):]*1140, flux[(30-count):], maxfev=5000)
-            time_factor = 1
-    except:
-        params = (0, 5.0, 0.01)
+    # try:
+    if time_unit == 'min':
+        params, pcov = curve_fit(exp_decay, time[int(np.where(time==0)[0]): int(np.where(time==0)[0]) + 30], flux[int(np.where(time==0)[0]): int(np.where(time==0)[0]) + 30], maxfev=5000)
         time_factor = 1140
+    elif time_unit == 'days':
+        params, pcov = curve_fit(exp_decay, flux[np.where(time==0)[0]: np.where(time==0)[0] + 30]*1140, flux[np.where(time==0)[0]: np.where(time==0)[0] + 30], maxfev=5000)
+        time_factor = 1
+    # except:
+    #     params = (0, 5.0, 0.01)
+    #     time_factor = 1140
     x = np.linspace(0, 10, num = 1500)/(1140)
     y = exp_decay(x, params[0], params[1]*int(time_factor), params[2])
     amp, idx = find_nearest(y, y.max()/2)
