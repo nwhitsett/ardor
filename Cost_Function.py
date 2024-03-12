@@ -97,7 +97,7 @@ def cost_function_map(targets_RAs, targets_DECs, output_dir=None, resolution=50)
     if output_dir != None:
         np.savetxt(output_dir, CF_map, delimiter=',')
 
-TOIs = pd.read_csv('C:/Users/natha/OneDrive - Washington University in St. Louis/Desktop/csv-file-toi-catalog.csv')
+TOIs = pd.read_csv('/data/whitsett.n/ardor/templates/csv-file-toi-catalog.csv')
 TOI_RA = np.array(TOIs['TIC Right Ascension'])
 TOI_DEC = np.array(TOIs['TIC Declination'])
 
