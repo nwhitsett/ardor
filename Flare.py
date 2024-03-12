@@ -17,6 +17,11 @@ import warnings
 import planck_law as pl
 import planck_law as pl
 import aflare
+import time as timer
+import copy
+import allesfitter_priors
+import shutil
+import allesfitter
 warnings.filterwarnings("ignore")
 def exp_decay(x, a, b, c):
     '''
@@ -139,7 +144,7 @@ def phase_folder(time, period, epoch):
     phase = phase - period/2
     return phase
 
-def flare_ID(data, sigma):
+def flare_ID(data, sigma, fast = False):
     '''
     
 
@@ -168,37 +173,73 @@ def flare_ID(data, sigma):
     end = 250
     shift = 0
     peak_index = 0
-    for flux in data:
-        if end >= len(data):
-            sig = sigma*np.std(data[begin:len(data)-1])
-            mu = np.mean(data[begin:len(data)-1])
-        else:
-            sig = sigma*np.std(data[begin:end])
-            mu = np.mean(data[begin:end])
-        if flux > (mu + sig) and flare == False:
-            flare = True
-            flare_length += 1
-            peak_index = count
-        try:
-            if flare == True and data[count+1] > (mu + sig/3):
-                flare_length += 1
-            if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
-                flare = False
-                flare_indices.append(peak_index)
-                flare_length_list.append(flare_length)
-                flare_length = 0
-                peak_index = 0
-            count += 1
-            shift += 1
-            if shift == 10:
-                begin += 10
-                end += 10
-                shift = 0
-        except:
-            continue
+    if fast == False:
+        for flux in data:
+            try:
+                if end >= len(data):
+                    sig = sigma*np.std(data[begin:len(data)-1])
+                    mu = np.mean(data[begin:len(data)-1])
+                else:
+                    sig = sigma*np.std(data[begin:end])
+                    mu = np.mean(data[begin:end])
+                if flux > (mu + sig) and flare == False:
+                    flare = True
+                    flare_length += 1
+                    peak_index = count
+                if flare == True and data[count+1] > (mu + sig/3):
+                    flare_length += 1
+                if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
+                    flare = False
+                    flare_indices.append(peak_index)
+                    flare_length_list.append(flare_length)
+                    flare_length = 0
+                    peak_index = 0
+                elif flare == True and data[count+1] < (mu + sig/3) and flare_length < 3:
+                    flare = False
+                    flare_length = 0
+                count += 1
+                shift += 1
+                if shift == 250:
+                    begin += 250
+                    end += 250
+                    shift = 0
+            except:
+                continue
+    elif fast == True:
+        for flux in data:
+            try:
+                if end >= len(data):
+                    sig = sigma*np.std(data[begin:len(data)-1])
+                    mu = np.mean(data[begin:len(data)-1])
+                else:
+                    sig = sigma*np.std(data[begin:end])
+                    mu = np.mean(data[begin:end])
+                if flux > (mu + sig) and flare == False:
+                    flare = True
+                    flare_length += 1
+                    peak_index = count
+                if flare == True and data[count+1] > (mu + sig/3):
+                    flare_length += 1
+                if flare == True and data[count+1] < (mu + sig/3) and flare_length >= 3:
+                    flare = False
+                    flare_indices.append(peak_index)
+                    flare_length_list.append(flare_length)
+                    flare_length = 0
+                    peak_index = 0
+                elif flare == True and data[count+1] < (mu + sig/3) and flare_length < 3:
+                    flare = False
+                    flare_length = 0
+                count += 1
+                shift += 1
+                if shift == 1000:
+                    begin += 1000
+                    end += 1000
+                    shift = 0
+            except:
+                continue
     return flare_indices, flare_length_list
 
-def delete_nans(time, data):
+def delete_nans(time, data, error):
     '''
     
     Parameters
@@ -224,9 +265,11 @@ def delete_nans(time, data):
     '''
     time = time.tolist()
     data = data.tolist()
+    error = error.tolist()
     nan_set = set()
     count_data = 0
     count_time = 0
+    count_error = 0
     for indices in data:
         if np.isnan(indices) == True:
             nan_set.add(count_data)
@@ -235,13 +278,19 @@ def delete_nans(time, data):
         if np.isnan(indices) == True:
             nan_set.add(count_time)
         count_time += 1
+    for indices in error:
+        if np.isnan(indices) == True:
+            nan_set.add(count_error)
+        count_time += 1
     time1 = [i for j, i in enumerate(time) if j not in nan_set]
     data1 = [i for j, i in enumerate(data) if j not in nan_set]
+    error1 = [i for j, i in enumerate(error) if j not in nan_set]
     time1 = np.array(time1)
     data1 = np.array(data1)
-    return time1, data1
+    error1 = np.array(error1)
+    return time1, data1, error1
 
-def SMA_detrend(time, data, time_scale, LS_Iterations=3):
+def SMA_detrend(time, data, time_scale, LS_Iterations=25):
     '''
     
     This applies a windowed, Single Moving Average to detrend potentially
@@ -257,36 +306,38 @@ def SMA_detrend(time, data, time_scale, LS_Iterations=3):
     -------
     numpy array
         Returns the detrended data array.
-
     '''
+    ls = LS(time,data)
+    frequency,power = ls.autopower(minimum_frequency=0.1, maximum_frequency=100)
+    cutoff = ls.false_alarm_probability(power.max()) 
+    if cutoff < 0.10:
+        ls = LS(time,data, nterms=3)
+        frequency, power = ls.autopower(minimum_frequency=0.1, maximum_frequency=100)
+        best_frequency = frequency[np.argmax(power)]
+        theta = ls.model_parameters(best_frequency)
+        offset = ls.offset()
+        design_matrix = ls.design_matrix(best_frequency, time)
+        data = data - (offset + design_matrix.dot(theta))
+        LS_model = (offset + design_matrix.dot(theta))
+    tmp_data = copy.deepcopy(data)
+    sigma = np.std(tmp_data)
+    mean = np.median(tmp_data)
+    for index, num in enumerate(tmp_data):
+        if num >= 3*sigma + mean:
+            tmp_data[index] = mean
     mov_average = []
     j = 0
     i = 0
     for a in range(time_scale - 1):
-        window = data[a : 1 + a + j]
+        window = tmp_data[a : 1 + a + j]
         mov_average.append(sum(window)/(j+1))
         j += 1
     while i < len(data) - time_scale + 1:
-        window = data[i : i + time_scale]
+        window = tmp_data[i : i + time_scale]
         window_average = round(sum(window) / time_scale, 2)
         mov_average.append(window_average)
         i += 1
     SMA = data - np.array(mov_average)
-    count = 0
-    ls = LS(time, SMA)
-    freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=1000, method='fast')
-    cutoff = ls.false_alarm_probability(power.max())
-    while cutoff < 0.99 and count <= LS_Iterations:
-        best_frequency = freq[np.argmax(power)]
-        ls = LS(time, SMA)
-        theta = ls.model_parameters(best_frequency)
-        offset = ls.offset()
-        design_matrix = ls.design_matrix(best_frequency, time)
-        SMA = SMA -( offset +design_matrix.dot(theta))
-        cutoff = ls.false_alarm_probability(power.max())
-        ls = LS(time, SMA)
-        freq, power = ls.autopower(minimum_frequency=1, maximum_frequency=1000, method='fast')
-        count += 1
     return SMA
         
 def flare_phase_folded_ID(phase, flare_array, period, epoch):
@@ -379,14 +430,15 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
     
     file = data_directory
     b, pdcsap_flux, pdcsap_error = TESS_data_extract(file, PDCSAP_ERR=True)
-    time, flux = delete_nans(b, pdcsap_flux)
+    time, flux, pdcsap_error = delete_nans(b, pdcsap_flux, pdcsap_error)
     detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
-    plt.clf()
-    flares, lengths = flare_ID(detrend_flux, 3)
     if file.endswith('a_fast-lc.fits') == True:
         observation_time += len(time)*(0.33333333)
+        cadence = 'sec'
     elif file.endswith('a_fast-lc.fits') == False:  
         observation_time += len(time)*2
+        cadence = 'min'
+    flares, lengths = flare_ID(detrend_flux, 3, cadence)
     phase = phase_folder(time, period, epoch)
     index = 0
     possible_flares += len(flares)
@@ -422,14 +474,12 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
                 popt, pcov = curve_fit(exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
                 squares = (alles_data[events:events+30] - exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
                 chi2_cutoff = 18
-                plt.clf()
             elif lengths[index] >= 15 and lengths[index] < 25:
                 alles_data = new_data/np.median(new_data)
                 error = new_error/np.median(new_data)
                 popt, pcov = curve_fit(exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
                 squares = (alles_data[events:events+20] - exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
                 chi2_cutoff = 9.5
-                plt.clf()
             elif lengths[index] > 5 and lengths[index] < 15:
                 alles_data = new_data/np.median(new_data)
                 error = new_error/np.median(new_data)
@@ -442,7 +492,6 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
                 popt, pcov = curve_fit(exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
                 squares = (alles_data[events:events+7] - exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
                 chi2_cutoff = 1.2
-                plt.clf()
             chi_squared = np.sum(squares)
             if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
                 flare_time_scale.append(popt[1])
@@ -467,6 +516,247 @@ def analyze_flares(data_directory, flare_csv_directory, period, epoch, host_T, h
         index += 1
     return host_ID_list, accepted_flare_number, peak_time, flare_amplitude, flare_time_scale, flare_energy, Teff, radius, flare_phase, flare_count
 
+def tier0(TESS_fits_file):
+    '''
+    
+
+    Parameters
+    ----------
+    TESS_fits_file : string
+        The TESS light curve you wish to detrend and clean up.
+    Returns
+    -------
+    time : numpy array
+        The time axis, given in BJD - 2457000 (Days). Used next in tier 2
+    flux : numpy array
+        The raw, cleaned up pdcsap flux from the TESS file. To be used in tier 2.
+    detrend_flux : numpy array
+        Median centered pdcsap flux, given in electrons/second. Used next in tier 1
+    pdcsap_error : numpy array
+        Error in the detrended flux. Used next in tier 2
+
+    '''
+    b, pdcsap_flux, pdcsap_error = TESS_data_extract(TESS_fits_file, PDCSAP_ERR=True)
+    time, flux, pdcsap_error = delete_nans(b, pdcsap_flux, pdcsap_error)
+    detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
+    if TESS_fits_file.endswith('a_fast-lc.fits') == True:
+        fast = True
+    elif TESS_fits_file.endswith('a_fast-lc.fits') == False:  
+        fast = False
+    return time, flux, detrend_flux, pdcsap_error, fast
+
+def tier1(detrend_flux, sigma, fast=False):
+    '''
+    
+
+    Parameters
+    ----------
+    detrend_flux : numpy array
+        The median centered, detrended pdcsap flux data of the TESS light curve file, in units of electrons/second. 
+        Intended to be from the second output of the tier 0 function
+    cadence : string
+        Either 'min' or 'sec'. Depends on what TESS fits file is used: a_fast-lc = 'sec', else 'min'
+    sigma : float
+        The sensitivity cutoff in which you wish to search for flares. Typically, this is 3 sigma, though some pipelines
+        go as low as 2.5. Will NOT work well below 1 sigma.
+    Returns
+    -------
+    flares : numpy array
+        Returns an array of the **indices** of the flares in the time array passed. To get the BJD time of a given flare, 
+        pass 'time[flares[0]]', etc. Used in tier 2.
+    lengths : numpy array
+        A 1:1 numpy array with flares, giving the approximate duration of the flare in units of **indices** of the time 
+        axis. This will either be two minutes/index or 20 seconds an index, depending on what type of light curve is used.
+        Used in tier 2.
+
+    '''
+    flares, lengths = flare_ID(detrend_flux, sigma, fast=fast)
+    return flares, lengths
+
+def tier2(time, flux, pdcsap_error, flares, lengths, output_dir, host_name = 'My_Host', T = 4000, host_radius = 1):
+    '''
+    
+    Parameters
+    ----------
+    time : numpy array
+        The time data of the TESS light curve file. Intended to be from the first output of the tier 0 function.
+        Units of BJD - 255700 (Days)
+    detrend_flux : numpy array
+        The median centered, detrended pdcsap flux data of the TESS light curve file, in units of electrons/second. 
+        Intended to be from the second output of the tier 0 function
+    pdcsap_error : numpy array
+        The uncertainty in the detrended flux. Intended to be from the third output of the tier 0 function.
+    flares : numpy array
+        Returns an array of the **indices** of the flares in the time array passed. To get the BJD time of a given flare, 
+        pass 'time[flares[0]]', etc. Intended as the first output from tier 2.
+    lengths : numpy array
+        A 1:1 numpy array with flares, giving the approximate duration of the flare in units of **indices** of the time 
+        axis. This will either be two minutes/index or 20 seconds an index, depending on what type of light curve is used.
+        Intended as the first output from tier 2.
+    output_dir : string
+        The directory in which you wish to save the flare csv files to.
+    Teff : float
+        The effective stellar temperature of the host star. If not passed, 4000 K will be assumed. Used to estimate 
+        flare energies.
+    host_radiu : float
+        The radius of the host star. If not passed, a value of 1 solar radii is assumed. Used to estimate the flare energies.
+
+    Returns
+    -------
+    Snippets of the flares found from 
+
+    '''
+    TOI_ID_list = []
+    flare_number = []
+    peak_time = []
+    amplitude = []
+    time_scale = []
+    Teff = []
+    radius = []
+    total_flare_energies = []
+    flare_amplitude = []
+    flare_time_scale = []
+    flare_energy = []
+    accepted_flare_index = []
+    accepted_flare_number = []
+    index = 0
+    flare_count = 1
+    total_flares = 0
+    os.makedirs(output_dir + '/' + str(host_name), exist_ok=True)
+    for flare_events in flares:
+        if flare_events >= 50 and len(flux) - flare_events > 50:
+            new_time = time[flare_events-50:flare_events+50]
+            new_data = flux[flare_events-50:flare_events+50]
+        elif flare_events < 50:
+            new_time = time[0+flare_events:flare_events+50]
+            new_data = flux[0+flare_events:flare_events+50]
+        elif len(flux) - flare_events < 50:
+            new_time = time[flare_events:]
+            new_data = flux[flare_events:]
+        new_error = pdcsap_error[flare_events-50:flare_events+50]
+        recenter = np.max(new_data[int(len(new_data)/2-10):int(len(new_data)/2+10)])
+        norm_time = time[flare_events]
+        events = np.where(new_data == recenter)[0][0]
+        new_time = (new_time - new_time[events])*24*60
+        if lengths[index] >= 25:
+            alles_data = new_data/np.median(new_data)
+            error = new_error/np.median(new_data)
+            popt, pcov = curve_fit(exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
+            squares = (alles_data[events:events+30] - exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
+            chi2_cutoff = 20.843
+        elif lengths[index] >= 15 and lengths[index] < 25:
+            alles_data = new_data/np.median(new_data)
+            error = new_error/np.median(new_data)
+            popt, pcov = curve_fit(exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
+            squares = (alles_data[events:events+20] - exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
+            chi2_cutoff = 11.912
+        elif lengths[index] > 5 and lengths[index] < 15:
+            alles_data = new_data/np.median(new_data)
+            error = new_error/np.median(new_data)
+            popt, pcov = curve_fit(exp_decay, new_time[events:events+10], alles_data[events:events+10], maxfev=5000)
+            squares = (alles_data[events:events+10] - exp_decay(new_time[events:events+10], *popt))**2/(np.var(alles_data[events:events+10]))
+            chi2_cutoff = 3.455
+        elif lengths[index] <= 5:
+            alles_data = new_data/np.median(new_data)
+            error = new_error/np.median(new_data)
+            popt, pcov = curve_fit(exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
+            squares = (alles_data[events:events+7] - exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
+            chi2_cutoff = 1.3
+        chi_squared = np.sum(squares)
+        if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
+            time_scale.append(popt[1])
+            flare_time_scale.append(popt[1])
+            amplitude.append(popt[0])
+            flare_amplitude.append(popt[0])
+            peak_time.append(norm_time)
+            TOI_ID_list.append(host_name)
+            flare_number.append(flare_count)
+            try:
+                energy = bolo_flare_energy(popt, T, host_radius, pl.planck_integrator(600e-9, 1000e-9, T)/pl.planck_integrator(600e-9, 1000e-9, 9000), t_unit='days')
+            except:
+                energy = np.NaN
+            flare_energy.append(energy)
+            total_flare_energies.append(energy)
+            Teff.append(T)
+            radius.append(host_radius)
+            try:
+                X = np.column_stack((new_time, alles_data, error))
+            except:
+                X = np.column_stack(([0],[0],[0]))
+            accepted_flare_index.append(flares[index])
+            accepted_flare_number.append(flare_count)
+            print(flare_count)
+            if lengths[index] > 5:
+                print('Flare ' + str(flare_count) + ' length: ' + str(lengths[index]))
+            np.savetxt(output_dir + '/' + str(host_name) + '/Flare_' + str(index) + '.csv', X, delimiter=',')
+            flare_count += 1
+            total_flares += 1
+            ZZ = np.column_stack((TOI_ID_list, flare_number, peak_time, amplitude, time_scale, Teff, radius, flare_energy))
+            with open(output_dir + '/' + str(host_name) + '/All_Flare_Parameters.csv', "a") as f:
+                np.savetxt(f, ZZ, delimiter=",", fmt='%s')
+                f.close()
+            index += 1
+                    
+def tier3(tier_2_output_dir, tier_3_working_dir, tier_3_output_dir, settings_template_dir, params_template_dir, host_name = 'My_Host', T = 4000, host_radius = 1, MCMC_CPUS = 1):
+    #Check each folder
+    flare_files = os.listdir(tier_2_output_dir)
+    for csvs in flare_files:
+        parameter_list_list = [[], [], [], [], [], [], [], [], [], [], [], [], [], [], []]
+        # try:
+        #Make output directory to store plots and flare data for each target
+        #Omit the statistics files
+        if csvs == 'All_Flare_Parameters.csv' or csvs == 'Host_Statistics.txt' or csvs == 'Flare_Phase.csv':
+            continue
+        # Copy relevant file to allesfitter folder
+        shutil.copyfile(tier_2_output_dir + '/' + csvs, tier_3_working_dir+ '/' +  csvs)
+        allesfitter_priors.csv_cleaner(tier_3_working_dir + '/' + csvs)
+        # Run allesfitter
+        allesfitter_priors.flare_params(tier_3_working_dir + '/' +  csvs, params_template_dir, tier_3_working_dir + '/params.csv')
+        allesfitter_priors.flare_settings(tier_3_working_dir + '/' +  csvs, settings_template_dir, tier_3_working_dir + '/settings.csv', multi_process=True, cores=MCMC_CPUS)
+        allesfitter.mcmc_fit(tier_3_working_dir)
+        allesfitter.mcmc_output(tier_3_working_dir)
+
+        #Extract relevant parameters and append them to relevant lists
+        # Full Data csv
+        parameter_list = allesfitter_priors.return_parameters(tier_3_working_dir + '/results/mcmc_table.csv')
+        if len(parameter_list) == 0:
+            continue
+        energy = allesfitter_priors.flare_energy(parameter_list[3], parameter_list[6], T,  host_radius)
+        parameter_list_list[0].append(host_name)
+        parameter_list_list[1].append(csvs[:-4])
+        for index in range(9):
+            parameter_list_list[index+2].append(parameter_list[index])
+        parameter_list_list[11].append(energy)
+        parameter_list_list[12].append(T)
+        parameter_list_list[13].append(host_radius)
+
+
+        #Per target csv
+        #Remove current csv
+        os.remove(tier_3_working_dir + '/' +  csvs)
+        #Copy relevant graphs and log files
+        shutil.copyfile(tier_3_working_dir + '/results/mcmc_corner.pdf', tier_3_output_dir + '/mcmc_corner_' + csvs[:-4] + '.pdf')
+        shutil.copyfile(tier_3_working_dir + '/results/mcmc_fit_b.pdf', tier_3_output_dir + '/mcmc_fit_' + csvs[:-4] + '.pdf')
+        result_dir = os.listdir(tier_3_working_dir + '/results')
+        for dirs in result_dir:
+            if dirs[-3] == 'l':
+                shutil.copyfile(tier_3_working_dir + '/results/' + dirs, tier_3_output_dir + '/mcmc_' + csvs[:-4] + '.log')
+        #Delete results folder
+        for files in os.listdir(tier_3_working_dir + '/results'):
+            os.remove(tier_3_working_dir + '/results/' + files)
+        # except:
+        #     print(1)
+        #     parameter_list_list[0].append(host_name)
+        #     parameter_list_list[1].append(csvs[:-4])
+        #     for index in range(9):
+        #         parameter_list_list[index+2].append(np.nan)
+        #     parameter_list_list[11].append(np.nan)
+        #     parameter_list_list[12].append(T)
+        #     parameter_list_list[13].append(host_radius)
+        ZZ = np.column_stack((parameter_list_list[0], parameter_list_list[1], parameter_list_list[2], parameter_list_list[3], parameter_list_list[4], parameter_list_list[5], parameter_list_list[6], parameter_list_list[7], parameter_list_list[8], parameter_list_list[9], parameter_list_list[10], parameter_list_list[11], parameter_list_list[12], parameter_list_list[13]))
+        with open(tier_3_output_dir + '/All_TOI_MCMC_Flares.csv', "a") as f:
+            np.savetxt(f, ZZ, delimiter=",", fmt='%s')
+            f.close()
 TESS_Folder_ID = os.listdir('/data/whitsett.n/TESS_Light_Curves/All_TOI/')
 TOI_Catalog = pd.read_csv('/data/whitsett.n/Reference_Files/All_TOI_12_17_23.csv')
 total_flares = 0
@@ -488,13 +778,17 @@ total_periastron_list = []
 total_periastron_epoch_list = []
 total_epoch_list = []
 list_index = 0
-for M_dwarves in TESS_Folder_ID[1270:]:
+
+tier0_tau = []
+tier1_tau = []
+tier2_tau = []
+for M_dwarves in TESS_Folder_ID:
     ##Iteration Scheme
     TOI_ID = M_dwarves
     print(TOI_ID)
 
     a = os.listdir('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves)
-    os.mkdir('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/')
+    os.makedirs('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/', exist_ok=True)
     print(item_count, M_dwarves)
     ##Relevant parameters from TOI catalog
     period = np.array(TOI_Catalog.loc[TOI_Catalog['hostname'] == float(M_dwarves), 'pl_orbper'])[0]
@@ -546,36 +840,50 @@ for M_dwarves in TESS_Folder_ID[1270:]:
     # total_periastron_epoch_list = []
     total_epoch_list = []
     for folders in a:
+        t1 = timer.time()
         try:
             b, pdcsap_flux, pdcsap_error = TESS_data_extract('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
         except:
             continue
-        time, flux = delete_nans(b, pdcsap_flux)
-        detrend_flux = SMA_detrend(time, flux, 80, LS_Iterations=5)
-        flares, lengths = flare_ID(detrend_flux, 3)
         if folders.endswith('a_fast-lc.fits') == True:
-            observation_time += len(time)*(0.33333333)
-            total_observation_time += len(time)*(0.33333333)
+            observation_time += len(pdcsap_flux)*(0.33333333)
+            total_observation_time += len(pdcsap_flux)*(0.33333333)
+            fast = True
         elif folders.endswith('a_fast-lc.fits') == False:  
-            observation_time += len(time)*2
-            total_observation_time += len(time)*2
+            observation_time += len(pdcsap_flux)*2
+            total_observation_time += len(pdcsap_flux)*2
+            fast = False
+        time, flux, pdcsap_error = delete_nans(b, pdcsap_flux, pdcsap_error)
+        detrend_flux = SMA_detrend(time, flux, 80)
+        t2 = timer.time()
+        tier0_tau.append(t2-t1)
+        flares, lengths = flare_ID(detrend_flux, 3, fast=fast)
         index = 0
         possible_flares += len(flares)
         total_possible_flares += len(flares)
 
         for flare_events in flares:
-            if flare_events >= 100 and len(flux) - flare_events > 100:
-                new_time = time[flare_events-100:flare_events+100]
-                new_data = flux[flare_events-100:flare_events+100]
-            elif flare_events < 100:
-                new_time = time[0+flare_events:flare_events+100]
-                new_data = flux[0+flare_events:flare_events+100]
-            elif len(flux) - flare_events < 100:
+            if flare_events >= 50 and len(flux) - flare_events > 50:
+                new_time = time[flare_events-50:flare_events+50]
+                new_data = flux[flare_events-50:flare_events+50]
+                new_error = pdcsap_error[flare_events-50:flare_events+50]
+                recenter = np.max(new_data[45:50+lengths[index]])
+            elif flare_events < 50:
+                new_time = time[0:flare_events+50]
+                new_data = flux[0:flare_events+50]
+                new_error = pdcsap_error[flare_events:flare_events+50]
+                try:
+                    recenter = np.max(new_data[flare_events-5:flare_events+lengths[index]])
+                except:
+                    continue
+            elif len(flux) - flare_events < 50:
                 new_time = time[flare_events:]
                 new_data = flux[flare_events:]
-            new_error = pdcsap_error[flare_events-100:flare_events+100]
-            recenter = np.max(new_data[int(len(new_data)/2-10):int(len(new_data)/2+10)])
-            c, d =flare_ID(np.array(new_data), 3)
+                new_error = pdcsap_error[flare_events:]
+                try:
+                    recenter = np.max(new_data[flare_events-5:flare_events+lengths[index]])
+                except:
+                    continue
             norm_time = time[flare_events]
             events = np.where(new_data == recenter)[0][0]
             if period != '':
@@ -585,81 +893,93 @@ for M_dwarves in TESS_Folder_ID[1270:]:
                 phase = []
                 flare_phase_value = np.NAN
                 period = np.NAN
-                
+            t3 = timer.time()
+            tier1_tau.append(t3-t2)
+            new_time = (new_time - new_time[events])*24*60
             criteria1 = False
             if recenter > np.mean(new_data)+3*(np.std(new_data)):
                 criteria1 = True
-            if criteria1 == True and new_data[events+1] > np.mean(new_data)+2*(np.std(new_data)) and len(c) > 0:
-                new_time = (new_time - new_time[events])*24*60
-                if lengths[index] >= 25:
-                    alles_data = new_data/np.median(new_data)
-                    error = new_error/np.median(new_data)
-                    popt, pcov = curve_fit(exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
-                    squares = (alles_data[events:events+30] - exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
-                    chi2_cutoff = 20.843
-                elif lengths[index] >= 15 and lengths[index] < 25:
-                    alles_data = new_data/np.median(new_data)
-                    error = new_error/np.median(new_data)
-                    popt, pcov = curve_fit(exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
-                    squares = (alles_data[events:events+20] - exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
-                    chi2_cutoff = 11.912
-                elif lengths[index] > 5 and lengths[index] < 15:
-                    alles_data = new_data/np.median(new_data)
-                    error = new_error/np.median(new_data)
-                    popt, pcov = curve_fit(exp_decay, new_time[events:events+10], alles_data[events:events+10], maxfev=5000)
-                    squares = (alles_data[events:events+10] - exp_decay(new_time[events:events+10], *popt))**2/(np.var(alles_data[events:events+10]))
-                    chi2_cutoff = 3.455
-                elif lengths[index] <= 5:
-                    alles_data = new_data/np.median(new_data)
-                    error = new_error/np.median(new_data)
-                    popt, pcov = curve_fit(exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
-                    squares = (alles_data[events:events+7] - exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
-                    chi2_cutoff = 1.3
-                chi_squared = np.sum(squares)
-                if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
-                    half_max = (alles_data[8:15].max()-np.median(alles_data[0:8]))/2
-                    time_scale.append(popt[1])
-                    flare_time_scale.append(popt[1])
-                    amplitude.append(popt[0])
-                    flare_amplitude.append(popt[0])
-                    peak_time.append(norm_time)
-                    
-                    TOI_ID_list.append(TOI_ID)
-                    flare_number.append(flare_count)
-                    try:
-                        energy = bolo_flare_energy(popt, T, stellar_radius, pl.planck_integrator(600e-9, 1000e-9, T)/pl.planck_integrator(600e-9, 1000e-9, 9000), t_unit='days')
-                    except:
-                        energy = np.NaN
-                    flare_energy.append(energy)
-                    total_flare_energies.append(energy)
-                    Teff.append(T)
-                    radius.append(stellar_radius)
-                    try:
-                        X = np.column_stack((new_time[events-30:events+40], alles_data[events-30:events+40], error[events-30:events+40]))
-                    except:
-                        X = np.column_stack(([0],[0],[0]))
-                    baseline = st.median(new_data)*(lengths[index])*2
-                    median = st.median(new_data)
-                    flare_phase.append(flare_phase_value)
-                    accepted_flare_index.append(flares[index])
-                    accepted_flare_number.append(flare_count)
-                    total_flare_phases.append(flare_phase_value)
-                    TOI_period.append(period)
-                    # total_periastron_list.append(periastron)
-                    # total_periastron_epoch_list.append(epoch_periastron)
-                    # periastron_list.append(periastron)
-                    # periastron_epoch_list.append(epoch_periastron)
-                    total_epoch_list.append(epoch)
-                    epoch_list.append(epoch)
-                    print(flare_count)
-                    if lengths[index] > 5:
-                        print('Flare ' + str(flare_count) + ' length: ' + str(lengths[index]))
-                    np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Flare' + str(flare_count) + '.csv', X, delimiter=',')
-                    flare_count += 1
-                    total_flares += 1
-                    
+            try:
+                if criteria1 == True and new_data[events+1] > np.mean(new_data)+(np.std(new_data)):
+                    if lengths[index] >= 25:
+                        alles_data = new_data/np.median(new_data)
+                        error = new_error/np.median(new_data)
+                        popt, pcov = curve_fit(exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
+                        squares = (alles_data[events:events+30] - exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
+                        chi2_cutoff = 20.514
+                    elif lengths[index] >= 15 and lengths[index] < 25:
+                        alles_data = new_data/np.median(new_data)
+                        error = new_error/np.median(new_data)
+                        popt, pcov = curve_fit(exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
+                        squares = (alles_data[events:events+20] - exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
+                        chi2_cutoff = 12.554
+                    elif lengths[index] > 5 and lengths[index] < 15:
+                        alles_data = new_data/np.median(new_data)
+                        error = new_error/np.median(new_data)
+                        popt, pcov = curve_fit(exp_decay, new_time[events:events+10], alles_data[events:events+10], maxfev=5000)
+                        squares = (alles_data[events:events+10] - exp_decay(new_time[events:events+10], *popt))**2/(np.var(alles_data[events:events+10]))
+                        chi2_cutoff = 3.55
+                    elif lengths[index] <= 5:
+                        alles_data = new_data/np.median(new_data)
+                        error = new_error/np.median(new_data)
+                        popt, pcov = curve_fit(exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
+                        squares = (alles_data[events:events+7] - exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
+                        chi2_cutoff = 1.455
+                    chi_squared = np.sum(squares)
+                    if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
+                        time_scale.append(popt[1])
+                        flare_time_scale.append(popt[1])
+                        amplitude.append(popt[0])
+                        flare_amplitude.append(popt[0])
+                        peak_time.append(norm_time)
                         
-            index += 1
+                        TOI_ID_list.append(TOI_ID)
+                        flare_number.append(flare_count)
+                        try:
+                            energy = bolo_flare_energy(popt, T, stellar_radius, pl.planck_integrator(600e-9, 1000e-9, T)/pl.planck_integrator(600e-9, 1000e-9, 9000), t_unit='days')
+                        except:
+                            energy = np.NaN
+                        flare_energy.append(energy)
+                        total_flare_energies.append(energy)
+                        Teff.append(T)
+                        radius.append(stellar_radius)
+                        try:
+                            X = np.column_stack((new_time, alles_data, error))
+                        except:
+                            X = np.column_stack(([0],[0],[0]))
+                        baseline = st.median(new_data)*(lengths[index])*2
+                        median = st.median(new_data)
+                        flare_phase.append(flare_phase_value)
+                        accepted_flare_index.append(flares[index])
+                        accepted_flare_number.append(flare_count)
+                        total_flare_phases.append(flare_phase_value)
+                        TOI_period.append(period)
+                        # total_periastron_list.append(periastron)
+                        # total_periastron_epoch_list.append(epoch_periastron)
+                        # periastron_list.append(periastron)
+                        # periastron_epoch_list.append(epoch_periastron)
+                        total_epoch_list.append(epoch)
+                        epoch_list.append(epoch)
+                        print(flare_count)
+                        if lengths[index] > 5:
+                            print('Flare ' + str(flare_count) + ' length: ' + str(lengths[index]))
+                        np.savetxt('/data/whitsett.n/Flare_Csvs/All_TOI/' + M_dwarves + '/Flare' + str(flare_count) + '.csv', X, delimiter=',')
+                        flare_count += 1
+                        total_flares += 1
+                        t4 = timer.time()
+                        tier2_tau.append(t4-t3)
+            except:
+                continue
+                        
+                            
+                index += 1
+        ZZ = np.column_stack((np.array(np.array(tier0_tau).mean()), np.array(np.array(tier1_tau).mean()/len(flares)), np.array(np.array(tier2_tau).mean())))
+        with open("/data/whitsett.n/Pipeline_Validation/Time_Stats.csv", "a") as f:
+            np.savetxt(f, ZZ, delimiter=",", fmt='%s')
+            f.close()
+        tier0_tau = []
+        tier1_tau = []
+        tier2_tau = []
     if observation_time == 0:
         observation_time = -1
     if possible_flares == 0 :
