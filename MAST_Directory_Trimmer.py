@@ -33,5 +33,5 @@ def MAST_data_extractor(input_dir):
         
                     
                 
-MAST_data_extractor('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/TESS Data/Periastron_Hosts')
+MAST_data_extractor('/data/whitsett.n/TESS_Light_Curves/All_TOI')
                 
