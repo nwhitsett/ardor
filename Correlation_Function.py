@@ -10,53 +10,116 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from scipy.stats import uniform
 from scipy.stats import ks_1samp
-flares = pd.read_csv("C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Desktop/Flare Output Files/All Exoplanets/All_Exoplanet_Flares.csv")
+TOI_flares = pd.read_csv("C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Grad School/Fall 2023/Research/Final Data/All_TOI_Flares.csv")
+Exoplanet_flares = pd.read_csv("C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Grad School/Fall 2023/Research/Final Data/All_Exoplanet_MCMC_Flares.csv")
 count = 0
 p_values = []
 center_statistic = []
 test = []
 
-for hosts in np.array(flares['# ID']):
+fig, ax = plt.subplots(3,3, figsize = (12,12))
+for hosts in np.array(TOI_flares['Host_Name']):
     name = hosts
-    planet_period = np.array(flares.loc[flares['# ID'] == hosts, 'Period (Days)'])[0]
-    phases = np.array(flares.loc[flares['# ID'] == hosts, 'Phase'])/planet_period
+    planet_period = np.array(TOI_flares.loc[TOI_flares['Host_Name'] == hosts, 'Period'])[0]
+    phases = np.array(TOI_flares.loc[TOI_flares['Host_Name'] == hosts, 'Phase'])/planet_period
     count += 1
     r = uniform.rvs(size=50)
     if count == len(phases):
-        c, d = ks_1samp(r, uniform.cdf, args=(0, 1), alternative='two-sided')
-        a, b = ks_1samp(phases, uniform.cdf, args=(0, 1), alternative='two-sided')
-        p_values.append(b)
-        center_statistic.append(a)
-        # if count > 5 and b < 0.01 and planet_period < 100:
-        #     print(1)
-        #     p_values.append(b)
-        #     center_statistic.append(a)
-            # x = np.sort(phases)
-            # y = np.arange(len(phases))/float(len(phases))
-            # plt.plot(x,y, label= hosts)
-            # print(planet_period)
+        a = ks_1samp(phases, uniform.cdf, args=(0, 1), alternative='two-sided')
+        p_values.append(a.pvalue)
+        center_statistic.append(a.statistic_location)
+        if count > 10 and a.pvalue < 0.05 and planet_period < 100:
+            x = np.sort(phases)
+            y = np.arange(len(phases))/float(len(phases))
+            ax[2, 0].plot(x,y,label=hosts)
             
         count = 0
-# plt.hist(center_statistic, bins=np.linspace(0,1, num=15))
-plt.hist(p_values, bins=np.linspace(0,1, num=15))
-# r = uniform.cdf(np.linspace(0, 1))
-# x = np.sort(r)
-# y = np.arange(len(x))/float(len(x))
-# plt.plot(x, y, label='Uniform Distribution')
-# plt.axvline(0.5, linewidth=1, linestyle='--')
-# plt.title('CPF of Non-Uniform Flaring Exoplanet Hosts')
-# plt.xlabel('Phase (Periastron Centered)')
-# plt.ylabel('Cumulative Probability')
+ax[2, 1].hist(center_statistic, bins=np.linspace(0,1, num=10), color='r', edgecolor='black', linewidth=1.2)
+ax[2, 2].hist(p_values, bins=np.linspace(0,1, num=10), color='r',edgecolor='black', linewidth=1.2)
 
-# plt.figure(dpi=1000)
-# plt.savefig('C:/Users/Nathan/OneDrive - Washington University in St. Louis/Desktop/CDF.png', dpi=1000)
-# plt.show()
-# periastron_phase = np.array(flares.loc[flares['# ID'] == "HD 41004 B", 'Flare Phase (Periastron Centered)'])
+count = 0
+p_values = []
+center_statistic = []
+test = []
+for hosts in np.array(Exoplanet_flares['Host_Name']):
+    name = hosts
+    planet_period = np.array(Exoplanet_flares.loc[Exoplanet_flares['Host_Name'] == hosts, 'Period'])[0]
+    phases = np.array(Exoplanet_flares.loc[Exoplanet_flares['Host_Name'] == hosts, 'Phase'])/planet_period
+    count += 1
+    r = uniform.rvs(size=50)
+    if count == len(phases):
+        a = ks_1samp(phases, uniform.cdf, args=(0, 1), alternative='two-sided')
+        p_values.append(a.pvalue)
+        center_statistic.append(a.statistic_location)
+        if count > 10 and a.pvalue < 0.05 and planet_period < 100:
+            x = np.sort(phases)
+            y = np.arange(len(phases))/float(len(phases))
+            ax[0, 0].plot(x,y,label=hosts)
+            
+        count = 0
+        
+        
+ax[0,0].axvline(x=0.5, color = 'c', alpha = 0.5, linestyle = ':', linewidth = 1.75)
+ax[0, 1].hist(center_statistic, bins=np.linspace(0,1, num=10), color='g',edgecolor='black', linewidth=1.2)
+ax[0, 2].hist(p_values, bins=np.linspace(0,1, num=10), color='g',edgecolor='black', linewidth=1.2)
 
-# planet_period = np.array(flares.loc[flares['# ID'] == "HD 41004 B", 'Period (Days)'])[0]
-# periastron_phase = periastron_phase
-# ks_1samp(periastron_phase, uniform.cdf, args=(-planet_period/2, planet_period))
-# r = uniform.cdf(np.linspace(-planet_period/2, planet_period/2), loc = -planet_period/2, scale = planet_period)
-# x = np.sort(periastron_phase)
-# y = np.arange(len(x))/float(len(x))
-# plt.plot(x, y)
+count = 0
+p_values = []
+center_statistic = []
+test = []
+for hosts in np.array(Exoplanet_flares['Host_Name']):
+    name = hosts
+    planet_period = np.array(Exoplanet_flares.loc[Exoplanet_flares['Host_Name'] == hosts, 'Period'])[0]
+    phases = np.array(Exoplanet_flares.loc[Exoplanet_flares['Host_Name'] == hosts, 'Period_Phase'])/planet_period
+    count += 1
+    r = uniform.rvs(size=50)
+    if count == len(phases):
+        a = ks_1samp(phases, uniform.cdf, args=(0, 1), alternative='two-sided')
+        p_values.append(a.pvalue)
+        center_statistic.append(a.statistic_location)
+        if count > 10 and a.pvalue < 0.05 and planet_period < 100:
+            x = np.sort(phases)
+            y = np.arange(len(phases))/float(len(phases))
+            ax[1, 0].plot(x,y,label=hosts)
+        count = 0
+ax[1, 1].hist(center_statistic, bins=np.linspace(0,1, num=10), color='c',edgecolor='black', linewidth=1.2)
+ax[1, 2].hist(p_values, bins=np.linspace(0,1, num=10), color='c',edgecolor='black', linewidth=1.2)
+
+
+r = uniform.cdf(np.linspace(0, 1))
+x = np.sort(r)
+y = np.arange(len(x))/float(len(x))
+ax[0, 0].plot(x, y, label='Uniform Distribution', linestyle = '--', linewidth=1.5, color = 'black')
+ax[1, 0].plot(x, y, label='Uniform Distribution', linestyle = '--', linewidth = 1.5, color='black')
+ax[2, 0].plot(x, y, label='Uniform Distribution', linestyle = '--', linewidth = 1.5, color='black')
+
+ax[0,0].set_title('Flare Phase CDF ($p \leq 0.05$)', fontsize = 'x-large')
+ax[0,1].set_title('Statistic Location Distribution', fontsize = 'x-large')
+ax[0,2].set_title('p-value Distribution', fontsize = 'x-large')
+
+
+ax[0,0].text(0.25, 0.75, 'Periastron Phase', horizontalalignment='center', transform=ax[0,0].transAxes, fontsize = 'medium', color = 'c')
+
+
+fig.text(0.08, 0.68, 'Constrained Periastron', rotation='vertical', fontsize = 'x-large')
+fig.text(0.08, 0.41, 'Other Exoplanet Hosts', rotation='vertical', fontsize = 'x-large')
+fig.text(0.08, 0.2, 'All TOI Hosts', rotation='vertical', fontsize = 'x-large')
+
+# ax[0,0].set_xlabel('Planet Phase')
+# ax[0,0].set_ylabel('Cumulative Probability', fontsize = 'x-large')
+ax[2,0].set_xlabel('Planet Phase', fontsize = 'x-large')
+# ax[1,0].set_ylabel('Cumulative Probability', fontsize = 'large')
+
+# ax[0,1].set_xlabel('Statistic Location')
+# ax[0,1].set_ylabel('Count')
+ax[2,1].set_xlabel('Statistic Location', fontsize = 'x-large')
+# ax[1,1].set_ylabel('Count')
+
+# ax[0,2].set_xlabel('p-value')
+# ax[0,2].set_ylabel('Count')
+ax[2,2].set_xlabel('p-value', fontsize = 'x-large')
+# ax[1,2].set_ylabel('Count')
+
+plt.subplots_adjust(wspace = 0.15, hspace = 0.1)
+
+fig.savefig('C:/Users/Nate Whitsett/OneDrive - Washington University in St. Louis/Grad School/Fall 2023/Research/Publication Documents/CDF.png', dpi=fig.dpi)

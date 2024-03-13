@@ -896,7 +896,7 @@ for M_dwarves in TESS_Folder_ID:
             tier1_tau.append(t3-t2)
             new_time = (new_time - new_time[events])*24*60
             criteria1 = False
-            if recenter > np.mean(new_data)+3*(np.std(new_data)):
+            if recenter > np.mean(new_data)+2*(np.std(new_data)):
                 criteria1 = True
             try:
                 if criteria1 == True and new_data[events+1] > np.mean(new_data)+(np.std(new_data)):

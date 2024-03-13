@@ -65,7 +65,7 @@ for M_dwarves in random_sample:
             flare_inject_dict_T2 = dict()
 
             b, pdcsap_flux, pdcsap_error = Flare.TESS_data_extract('/data/whitsett.n/TESS_Light_Curves/All_TOI/' + M_dwarves + '/' + folders, PDCSAP_ERR=True)
-            time, flux = Flare.delete_nans(b, pdcsap_flux)
+            time, flux, pdcsap_error = Flare.delete_nans(b, pdcsap_flux, pdcsap_error)
             for flares in range(15):
                 location = np.random.randint(50, len(flux)-50)
                 inject_location_index.append(location)
@@ -96,16 +96,15 @@ for M_dwarves in random_sample:
                 new_data = new_data/np.median(new_data)
                 new_error = pdcsap_error[flare_events-100:flare_events+100]
                 recenter = np.max(new_data[int(len(new_data)/2-15):int(len(new_data)/2+15)])
-                c, d = Flare.flare_ID(np.array(new_data), 3)
                 norm_time = time[flare_events]
                 events = np.where(new_data == recenter)[0][0]
                 peak_centered_event = flare_events + (events-100)
                 if peak_centered_event in inject_location_index:
                     flare_inject_dict_T1[peak_centered_event][3] = True
                 criteria1 = False
-                if recenter > np.mean(new_data)+3*(np.std(new_data)):
+                if recenter > np.mean(new_data)+2*(np.std(new_data)):
                     criteria1 = True
-                if criteria1 == True and new_data[events+1] > np.mean(new_data)+2*(np.std(new_data)) and len(c) > 0:
+                if criteria1 == True and new_data[events+1] > np.mean(new_data)+(np.std(new_data)):
                     new_time = (new_time - new_time[events])*24*60
                     if lengths[index] >= 25:
                         # new_time = np.array(new_time[events-10:events+50])*24*60
@@ -115,7 +114,7 @@ for M_dwarves in random_sample:
                         error = new_error/np.median(new_data)
                         popt, pcov = curve_fit(Flare.exp_decay, new_time[events:events+30], alles_data[events:events+30], maxfev=5000)
                         squares = (alles_data[events:events+30] - Flare.exp_decay(new_time[events:events+30], *popt))**2/(np.var(alles_data[events:events+30]))
-                        chi2_cutoff = 18
+                        chi2_cutoff = 20.514
                     elif lengths[index] >= 15 and lengths[index] < 25:
                         # new_time = np.array(new_time[events-10:events+30])*24*60
                         # new_data = np.array(new_data[events-10:events+30])
@@ -124,7 +123,7 @@ for M_dwarves in random_sample:
                         error = new_error/np.median(new_data)
                         popt, pcov = curve_fit(Flare.exp_decay, new_time[events:events+20], alles_data[events:events+20], maxfev=5000)
                         squares = (alles_data[events:events+20] - Flare.exp_decay(new_time[events:events+20], *popt))**2/(np.var(alles_data[events:events+20]))
-                        chi2_cutoff = 9.5
+                        chi2_cutoff = 12.554
                     elif lengths[index] > 5 and lengths[index] < 15:
                         # new_time = np.array(new_time[events-10:events+20])*24*60
                         # new_data = np.array(new_data[events-10:events+20])
@@ -133,7 +132,7 @@ for M_dwarves in random_sample:
                         error = new_error/np.median(new_data)
                         popt, pcov = curve_fit(Flare.exp_decay, new_time[events:events+10], alles_data[events:events+10], maxfev=5000)
                         squares = (alles_data[events:events+10] - Flare.exp_decay(new_time[events:events+10], *popt))**2/(np.var(alles_data[events:events+10]))
-                        chi2_cutoff = 3
+                        chi2_cutoff = 3.55
                     elif lengths[index] <= 5:
                         # new_time = np.array(new_time[events-10:events+14])*24*60
                         # new_data = np.array(new_data[(events-10):(events+14)])
@@ -142,12 +141,11 @@ for M_dwarves in random_sample:
                         error = new_error/np.median(new_data)
                         popt, pcov = curve_fit(Flare.exp_decay, new_time[events:events+7], alles_data[events:events+7], maxfev=5000)
                         squares = (alles_data[events:events+7] - Flare.exp_decay(new_time[events:events+7], *popt))**2/(np.var(alles_data[events:events+7]))
-                        chi2_cutoff = 2
+                        chi2_cutoff = 1.455
                     chi_squared = np.sum(squares)
                     if chi_squared < chi2_cutoff and popt[1] > 0 and popt[0] > 0:
                         if peak_centered_event in inject_location_index:
                             flare_inject_dict_T2[peak_centered_event][3] = True
-                            
                         index += 1
 
             test_flare_list_T1.append(flare_inject_dict_T1)
