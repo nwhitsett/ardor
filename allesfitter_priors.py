@@ -98,7 +98,7 @@ def flare_params(data_file_dir, params_template_dir, output_dir, flares=1):
     params.at[5, 'value'] = flux_err
     params.at[1, 'bounds'] = 'uniform ' + str(-0.001) + ' ' + str(0.001)
     params.at[2, 'bounds'] = 'uniform ' + str(0) + ' ' + str(2.5*tau)
-    params.at[3, 'bounds'] = 'uniform ' + str(amp*0.95) + ' ' + str(3.5*amp)
+    params.at[3, 'bounds'] = 'uniform ' + str(amp) + ' ' + str(3.5*amp)
     params.at[5, 'bounds'] = 'uniform ' + str(-1 + flux_err) + ' ' + str(1 + flux_err)
     # if flares > 1:
     #     for number in range(2, flares+1):

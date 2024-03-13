@@ -15,7 +15,6 @@ import statistics as st
 import os
 import warnings
 import planck_law as pl
-import planck_law as pl
 import aflare
 import time as timer
 import copy
@@ -881,7 +880,7 @@ for M_dwarves in TESS_Folder_ID:
                 new_data = flux[flare_events:]
                 new_error = pdcsap_error[flare_events:]
                 try:
-                    recenter = np.max(new_data[flare_events-5:flare_events+lengths[index]])
+                    recenter = np.max(new_data[flare_events:])
                 except:
                     continue
             norm_time = time[flare_events]
