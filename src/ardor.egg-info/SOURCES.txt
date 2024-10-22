@@ -1,3 +1,4 @@
+README.md
 setup.py
 src/ardor/Run.py
 src/ardor/__init__.py
@@ -16,6 +17,7 @@ src/ardor/Flares/Flare.py
 src/ardor/Flares/Flare_Vetter.py
 src/ardor/Flares/__init__.py
 src/ardor/Flares/aflare.py
+src/ardor/Flares/allesfitter_priors.py
 src/ardor/Pipeline_Completeness/Injection_Recovery.py
 src/ardor/Pipeline_Completeness/Injection_Recovery_Data_Process.py
 src/ardor/Pipeline_Completeness/Precision_Recall.py
@@ -32,7 +34,6 @@ src/ardor/SPI_Forward_Models/Alfven_Param_Estimation.py
 src/ardor/SPI_Forward_Models/Orbit_Model_Library.py
 src/ardor/SPI_Forward_Models/SPI_Simulation.py
 src/ardor/SPI_Forward_Models/__init__.py
-src/ardor/SPI_Forward_Models/allesfitter_priors.py
 src/ardor/Statistical_Tests/AD_Test.py
 src/ardor/Statistical_Tests/Correlation_Function.py
 src/ardor/Statistical_Tests/__init__.py

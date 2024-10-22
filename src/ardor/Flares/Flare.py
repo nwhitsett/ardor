@@ -16,6 +16,7 @@ from ardor.Flares import aflare
 import copy
 from ardor.Flares import allesfitter_priors
 import shutil
+import lightkurve as lk
 # import allesfitter
 
 
@@ -353,21 +354,25 @@ def SMA_detrend(time, data, error, time_scale, LS_Iterations=2, model = False):
     numpy array
         Returns the detrended data array.
     '''
-    time, data, error = delete_nans(time, data, error)
-    count = 0
-    ls = LS(time,data,error)
-    frequency,power = ls.autopower(minimum_frequency=0.1, maximum_frequency=100)
-    cutoff = ls.false_alarm_probability(power.max()) 
-    if cutoff < 0.3 and count < LS_Iterations:
-        ls = LS(time,data,error, nterms = 3)
-        frequency, power = ls.autopower(minimum_frequency=0.1, maximum_frequency=100)
-        best_frequency = frequency[np.argmax(power)]
-        theta = ls.model_parameters(best_frequency)
-        offset = ls.offset()
-        design_matrix = ls.design_matrix(best_frequency, time)
-        data = data - (design_matrix.dot(theta))
-        LS_model = (offset + design_matrix.dot(theta))
-        count += 1
+    
+    lc = lk.to_lightcurve(time, data)
+    print('EE')
+    return lc
+    # time, data, error = delete_nans(time, data, error)
+    # count = 0
+    # ls = LS(time,data,error)
+    # frequency,power = ls.autopower(minimum_frequency=0.1, maximum_frequency=100)
+    # cutoff = ls.false_alarm_probability(power.max()) 
+    # if cutoff < 0.3 and count < LS_Iterations:
+    #     ls = LS(time,data,error, nterms = 3)
+    #     frequency, power = ls.autopower(minimum_frequency=0.1, maximum_frequency=100)
+    #     best_frequency = frequency[np.argmax(power)]
+    #     theta = ls.model_parameters(best_frequency)
+    #     offset = ls.offset()
+    #     design_matrix = ls.design_matrix(best_frequency, time)
+    #     data = data - (design_matrix.dot(theta))
+    #     LS_model = (offset + design_matrix.dot(theta))
+    #     count += 1
     # mask_data = np.ma.masked_array(copy.deepcopy(data), mask=np.zeros(len(data)))
     # begin = 0
     # end = 200
@@ -388,23 +393,23 @@ def SMA_detrend(time, data, error, time_scale, LS_Iterations=2, model = False):
     #     if mask_data[index] > (3*sigma2 + median):
     #         mask_data.mask[index] = True
     #     shift += 1
-    mov_average = []
-    j = 0
-    i = 0
-    for a in range(time_scale - 1):
-        window = data[a : 1 + a + j]
-        mov_average.append(sum(window)/(j+1))
-        j += 1
-    while i < len(data) - time_scale + 1:
-        window = data[i : i + time_scale]
-        window_average = np.ma.round(np.ma.sum(window) / time_scale, 2)
-        mov_average.append(window_average)
-        i += 1
-    SMA = data - np.array(mov_average)
-    if model == False:
-        return SMA + 1
-    elif model == True:
-        return SMA + 1, mov_average
+    # mov_average = []
+    # j = 0
+    # i = 0
+    # for a in range(time_scale - 1):
+    #     window = data[a : 1 + a + j]
+    #     mov_average.append(sum(window)/(j+1))
+    #     j += 1
+    # while i < len(data) - time_scale + 1:
+    #     window = data[i : i + time_scale]
+    #     window_average = np.ma.round(np.ma.sum(window) / time_scale, 2)
+    #     mov_average.append(window_average)
+    #     i += 1
+    # SMA = data - np.array(mov_average)
+    # if model == False:
+    #     return SMA + 1
+    # elif model == True:
+    #     return SMA + 1, mov_average
         
 def flare_phase_folded_ID(phase, flare_array, period, epoch):
     new_ID_list = []
@@ -687,7 +692,10 @@ def tier3(tier_2_output_dir, tier_3_working_dir, tier_3_output_dir, settings_tem
         with open(tier_3_output_dir + '/All_TOI_MCMC_Flares.csv', "a") as f:
             np.savetxt(f, ZZ, delimiter=",", fmt='%s')
             f.close()
+   
             
+
+
 # font = {'family': 'serif',
 #         'color':  'black',
 #         'weight': 'normal',
